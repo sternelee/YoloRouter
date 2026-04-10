@@ -50,6 +50,10 @@ impl ProviderRegistry {
         self.providers.get(name)
     }
 
+    pub fn first(&self) -> Option<&Arc<dyn Provider>> {
+        self.providers.values().next()
+    }
+
     pub fn list(&self) -> Vec<String> {
         self.providers.keys().cloned().collect()
     }

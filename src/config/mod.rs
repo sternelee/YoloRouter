@@ -45,6 +45,18 @@ pub mod schema {
         pub models: Vec<ModelConfig>,
         #[serde(default)]
         pub default_tier: Option<String>,
+        /// Task types this scenario handles, e.g. ["coding", "code_review", "debugging"]
+        #[serde(default)]
+        pub match_task_types: Vec<String>,
+        /// Languages this scenario handles, e.g. ["cjk", "latin", "code"]
+        #[serde(default)]
+        pub match_languages: Vec<String>,
+        /// Higher priority scenarios are preferred when multiple match
+        #[serde(default)]
+        pub priority: i32,
+        /// Use as default when no other scenario matches
+        #[serde(default)]
+        pub is_default: bool,
     }
 
     #[derive(Debug, Clone, Serialize, Deserialize)]
@@ -55,9 +67,16 @@ pub mod schema {
         pub timeout_ms: u64,
         #[serde(default)]
         pub retry_count: u32,
+        /// Minimum analyzer confidence to use auto-routing (0.0–1.0)
+        #[serde(default = "default_confidence_threshold")]
+        pub confidence_threshold: f32,
     }
 
     fn default_timeout() -> u64 {
         30000
+    }
+
+    fn default_confidence_threshold() -> f32 {
+        0.6
     }
 }

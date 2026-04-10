@@ -102,6 +102,10 @@ mod tests {
                 },
             ],
             default_tier: None,
+            match_task_types: vec![],
+            match_languages: vec![],
+            priority: 0,
+            is_default: false,
         };
 
         let chain = FallbackChain::new(scenario);
@@ -128,6 +132,10 @@ mod tests {
                 },
             ],
             default_tier: None,
+            match_task_types: vec![],
+            match_languages: vec![],
+            priority: 0,
+            is_default: false,
         };
 
         let chain = FallbackChain::new(scenario);

@@ -2,79 +2,159 @@
 port = 8080
 log_level = "info"
 
-# Provider configuration
+# ─── Provider Configuration ───────────────────────────────────────────────────
+# api_key supports ${ENV_VAR} expansion
+
 [providers.anthropic]
 type = "anthropic"
 api_key = "${ANTHROPIC_API_KEY}"
-base_url = "https://api.anthropic.com"
 
 [providers.openai]
 type = "openai"
 api_key = "${OPENAI_API_KEY}"
-base_url = "https://api.openai.com/v1"
 
 [providers.gemini]
 type = "gemini"
 api_key = "${GEMINI_API_KEY}"
-base_url = "https://generativelanguage.googleapis.com"
 
-[providers.github]
-type = "github"
-auth_type = "token"
+# GitHub Copilot — obtain token via: yolo-router auth github
+[providers.github_copilot]
+type = "github_copilot"
 token = "${GITHUB_TOKEN}"
+# Optional: override the OAuth client_id (defaults to community client id)
+# client_id = "Iv1.b507a08c87ecfe98"
 
-# Scenario definitions - route different tasks to different models
+# OpenAI Codex (standard endpoint)
+[providers.codex]
+type = "codex"
+api_key = "${OPENAI_API_KEY}"
+
+# Azure OpenAI example
+# [providers.azure]
+# type = "codex"
+# api_key = "${AZURE_OPENAI_API_KEY}"
+# azure_endpoint = "https://your-resource.openai.azure.com"
+# api_version = "2024-02-01"
+
+# ─── Scenarios ────────────────────────────────────────────────────────────────
+# Each scenario matches requests by task type + language, then tries models in
+# order with automatic fallback.
+#
+# match_task_types: ["coding","reasoning","analysis","translation","creative","general"]
+# match_languages:  ["latin","cjk","code","mixed"]  (empty = match any)
+# priority:         higher = preferred when multiple scenarios match
+# is_default:       true = use when no other scenario matches
+
 [scenarios.coding]
 default_tier = "high"
+match_task_types = ["coding"]
+match_languages = []          # match any language
+priority = 100
+is_default = false
 
 [[scenarios.coding.models]]
 provider = "anthropic"
-model = "claude-opus"
+model = "claude-opus-4-5"
 cost_tier = "high"
-capabilities = ["reasoning", "code-analysis", "complex-problems"]
+capabilities = ["reasoning", "code", "complex-problems"]
 
 [[scenarios.coding.models]]
 provider = "openai"
-model = "gpt-4"
+model = "gpt-4o"
 cost_tier = "high"
 capabilities = ["code", "reasoning"]
-fallback_to = "gpt-3.5-turbo"
+
+[[scenarios.coding.models]]
+provider = "github_copilot"
+model = "gpt-4o"
+cost_tier = "low"
+capabilities = ["code"]
 
 [[scenarios.coding.models]]
 provider = "openai"
-model = "gpt-3.5-turbo"
+model = "gpt-4o-mini"
 cost_tier = "low"
-capabilities = ["code", "basic-reasoning"]
+capabilities = ["code"]
 
-[scenarios.simple_task]
-default_tier = "low"
+[scenarios.reasoning]
+default_tier = "high"
+match_task_types = ["reasoning", "analysis"]
+match_languages = []
+priority = 90
+is_default = false
 
-[[scenarios.simple_task.models]]
-provider = "openai"
-model = "gpt-3.5-turbo"
-cost_tier = "low"
-
-[[scenarios.simple_task.models]]
+[[scenarios.reasoning.models]]
 provider = "anthropic"
-model = "claude-haiku"
-cost_tier = "low"
-
-[scenarios.analysis]
-default_tier = "medium"
-
-[[scenarios.analysis.models]]
-provider = "anthropic"
-model = "claude-sonnet"
-cost_tier = "medium"
-capabilities = ["analysis", "reasoning"]
-
-[[scenarios.analysis.models]]
-provider = "openai"
-model = "gpt-4"
+model = "claude-opus-4-5"
 cost_tier = "high"
+capabilities = ["reasoning", "analysis"]
 
-# Global routing configuration
+[[scenarios.reasoning.models]]
+provider = "openai"
+model = "o1-mini"
+cost_tier = "high"
+capabilities = ["reasoning"]
+
+[[scenarios.reasoning.models]]
+provider = "anthropic"
+model = "claude-sonnet-4-5"
+cost_tier = "medium"
+capabilities = ["reasoning"]
+
+[scenarios.chinese]
+default_tier = "medium"
+match_task_types = []         # match any task
+match_languages = ["cjk"]     # Chinese/Japanese/Korean requests
+priority = 80
+is_default = false
+
+[[scenarios.chinese.models]]
+provider = "anthropic"
+model = "claude-sonnet-4-5"
+cost_tier = "medium"
+capabilities = ["reasoning", "multilingual"]
+
+[[scenarios.chinese.models]]
+provider = "openai"
+model = "gpt-4o"
+cost_tier = "high"
+capabilities = ["multilingual"]
+
+[[scenarios.chinese.models]]
+provider = "gemini"
+model = "gemini-2.0-flash"
+cost_tier = "low"
+capabilities = ["multilingual"]
+
+[scenarios.general]
+default_tier = "low"
+match_task_types = ["general", "creative", "translation"]
+match_languages = []
+priority = 50
+is_default = true             # fallback when no other scenario matches
+
+[[scenarios.general.models]]
+provider = "openai"
+model = "gpt-4o-mini"
+cost_tier = "low"
+
+[[scenarios.general.models]]
+provider = "anthropic"
+model = "claude-haiku-4-5"
+cost_tier = "low"
+
+[[scenarios.general.models]]
+provider = "gemini"
+model = "gemini-2.0-flash"
+cost_tier = "low"
+
+# ─── Routing ─────────────────────────────────────────────────────────────────
+
 [routing]
 fallback_enabled = true
 timeout_ms = 30000
 retry_count = 2
+# Minimum analyzer confidence to use auto-routing (0.0–1.0)
+# Below this threshold, the default scenario is used instead
+confidence_threshold = 0.6
+

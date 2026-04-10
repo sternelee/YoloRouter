@@ -1,12 +1,20 @@
-use yolo_router::{Config, server, utils};
+use yolo_router::{Config, server, utils, tui::TuiManager};
 use std::env;
 
 #[actix_web::main]
 async fn main() -> yolo_router::Result<()> {
     utils::init_logger();
-    
-    let config_path = env::var("YOLO_CONFIG").unwrap_or_else(|_| "config.toml".to_string());
-    
+
+    let args: Vec<String> = env::args().collect();
+    let tui_mode = args.contains(&"--tui".to_string());
+
+    // --config <path> flag (takes priority over YOLO_CONFIG env var)
+    let config_path = args
+        .windows(2)
+        .find(|w| w[0] == "--config")
+        .map(|w| w[1].clone())
+        .unwrap_or_else(|| env::var("YOLO_CONFIG").unwrap_or_else(|_| "config.toml".to_string()));
+
     let config = match Config::from_file(&config_path) {
         Ok(cfg) => {
             if let Err(e) = cfg.validate() {
@@ -16,8 +24,10 @@ async fn main() -> yolo_router::Result<()> {
             cfg
         }
         Err(e) => {
-            eprintln!("Failed to load config from {}: {}", config_path, e);
-            eprintln!("Using default configuration");
+            if !tui_mode {
+                eprintln!("Failed to load config from {}: {}", config_path, e);
+                eprintln!("Using default configuration");
+            }
             Config {
                 daemon: None,
                 providers: None,
@@ -27,8 +37,14 @@ async fn main() -> yolo_router::Result<()> {
         }
     };
 
+    if tui_mode {
+        let manager = TuiManager::new();
+        manager.run(config, config_path).await;
+        return Ok(());
+    }
+
     let daemon_config = config.daemon();
-    
+
     tracing::info!("Starting YoloRouter daemon");
     tracing::info!("Config file: {}", config_path);
     tracing::info!("Listening on 127.0.0.1:{}", daemon_config.port);
@@ -40,3 +56,4 @@ async fn main() -> yolo_router::Result<()> {
 
     Ok(())
 }
+

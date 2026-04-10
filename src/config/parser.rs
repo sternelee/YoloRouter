@@ -71,6 +71,7 @@ impl Config {
                 fallback_enabled: true,
                 timeout_ms: 30000,
                 retry_count: 2,
+                confidence_threshold: 0.6,
             })
     }
 
