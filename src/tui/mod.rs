@@ -1,6 +1,7 @@
 pub mod auth;
 pub mod config_editor;
 pub mod github_auth;
+pub mod codex_auth;
 
 pub use auth::AuthFlow;
 
@@ -445,44 +446,56 @@ fn draw_auth(f: &mut ratatui::Frame, _app: &TuiApp, area: ratatui::layout::Rect)
     let lines = vec![
         Line::from(""),
         Line::from(Span::styled(
-            "  Authentication Options",
+            "  Authentication — OAuth Device Flows & API Keys",
             Style::default().fg(Color::Yellow).add_modifier(Modifier::BOLD),
         )),
         Line::from(""),
-        Line::from("  Use the auth sub-command to authenticate providers:"),
+        Line::from(Span::styled(
+            "  ─── Device-Flow (browser-based) ──────────────────────────────",
+            Style::default().fg(Color::DarkGray),
+        )),
         Line::from(""),
         Line::from(Span::styled(
-            "  yolo-router auth anthropic",
+            "  yolo-router --auth github",
+            Style::default().fg(Color::Green),
+        )),
+        Line::from("    → GitHub Copilot OAuth device flow"),
+        Line::from("    → URL: https://github.com/login/device"),
+        Line::from("    → Polls GitHub until authorized"),
+        Line::from("    → Token saved to ~/.config/yolo-router/github_token"),
+        Line::from(""),
+        Line::from(Span::styled(
+            "  yolo-router --auth codex",
+            Style::default().fg(Color::Green),
+        )),
+        Line::from("    → ChatGPT Plus/Pro OAuth device flow"),
+        Line::from("    → URL: https://auth.openai.com/codex/device"),
+        Line::from("    → Step 1: Poll for authorization code"),
+        Line::from("    → Step 2: Exchange code+verifier for access_token"),
+        Line::from("    → Tokens saved to ~/.config/yolo-router/codex_oauth.json"),
+        Line::from(""),
+        Line::from(Span::styled(
+            "  ─── API Keys ──────────────────────────────────────────────────",
+            Style::default().fg(Color::DarkGray),
+        )),
+        Line::from(""),
+        Line::from(Span::styled(
+            "  yolo-router --auth anthropic",
             Style::default().fg(Color::Green),
         )),
         Line::from("    → Prompts for Anthropic API key"),
         Line::from(""),
         Line::from(Span::styled(
-            "  yolo-router auth openai",
+            "  yolo-router --auth openai",
             Style::default().fg(Color::Green),
         )),
         Line::from("    → Prompts for OpenAI API key"),
         Line::from(""),
         Line::from(Span::styled(
-            "  yolo-router auth github",
-            Style::default().fg(Color::Green),
-        )),
-        Line::from("    → Starts GitHub OAuth device flow"),
-        Line::from("    → Opens browser: https://github.com/login/device"),
-        Line::from("    → Displays user code to enter"),
-        Line::from("    → Polls until authorized"),
-        Line::from(""),
-        Line::from(Span::styled(
-            "  yolo-router auth gemini",
+            "  yolo-router --auth gemini",
             Style::default().fg(Color::Green),
         )),
         Line::from("    → Prompts for Google AI Studio API key"),
-        Line::from(""),
-        Line::from(Span::styled(
-            "  yolo-router auth codex",
-            Style::default().fg(Color::Green),
-        )),
-        Line::from("    → Prompts for OpenAI / Azure Codex API key"),
     ];
 
     let para = Paragraph::new(lines)

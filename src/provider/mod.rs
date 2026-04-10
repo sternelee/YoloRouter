@@ -4,6 +4,7 @@ pub mod gemini;
 pub mod generic;
 pub mod github_copilot;
 pub mod codex;
+pub mod codex_oauth;
 pub mod factory;
 
 pub use anthropic::AnthropicProvider;
@@ -12,6 +13,7 @@ pub use gemini::GeminiProvider;
 pub use generic::GenericProvider;
 pub use github_copilot::GitHubCopilotProvider;
 pub use codex::CodexProvider;
+pub use codex_oauth::CodexOAuthProvider;
 pub use factory::ProviderFactory;
 
 use crate::models::{ChatRequest, ChatResponse};

@@ -83,6 +83,34 @@ impl ProviderFactory {
 
                 Ok(Arc::new(provider))
             }
+            "codex_oauth" => {
+                // ChatGPT Plus/Pro OAuth — token persisted in ~/.config/yolo-router/codex_oauth.json
+                let token_path = config
+                    .extra
+                    .get("token_path")
+                    .and_then(|v| v.as_str())
+                    .map(std::path::PathBuf::from)
+                    .or_else(|| {
+                        dirs::config_dir().map(|d| d.join("yolo-router").join("codex_oauth.json"))
+                    });
+
+                // If an access_token is explicitly provided in config, use it
+                if let Some(access_token) = config.api_key.clone().or(config.token.clone()) {
+                    let refresh = config
+                        .extra
+                        .get("refresh_token")
+                        .and_then(|v| v.as_str())
+                        .map(String::from);
+                    Ok(Arc::new(CodexOAuthProvider::with_access_token(
+                        access_token,
+                        refresh,
+                        token_path,
+                    )))
+                } else {
+                    // No key in config — load persisted token from disk
+                    Ok(Arc::new(CodexOAuthProvider::new(token_path)))
+                }
+            }
             _ => {
                 let api_key = config
                     .api_key

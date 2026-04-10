@@ -1,5 +1,8 @@
 use yolo_router::{Config, server, utils, tui::TuiManager};
+use yolo_router::tui::github_auth::run_github_device_flow;
+use yolo_router::tui::codex_auth::run_codex_device_flow;
 use std::env;
+use std::path::PathBuf;
 
 #[actix_web::main]
 async fn main() -> yolo_router::Result<()> {
@@ -7,6 +10,11 @@ async fn main() -> yolo_router::Result<()> {
 
     let args: Vec<String> = env::args().collect();
     let tui_mode = args.contains(&"--tui".to_string());
+
+    // --auth <provider> subcommand
+    if let Some(provider) = args.windows(2).find(|w| w[0] == "--auth").map(|w| w[1].as_str()) {
+        return run_auth(provider).await;
+    }
 
     // --config <path> flag (takes priority over YOLO_CONFIG env var)
     let config_path = args
@@ -56,4 +64,73 @@ async fn main() -> yolo_router::Result<()> {
 
     Ok(())
 }
+
+/// Handle `yolo-router --auth <provider>` subcommands.
+async fn run_auth(provider: &str) -> yolo_router::Result<()> {
+    match provider {
+        "github" | "github_copilot" => {
+            println!("Starting GitHub Copilot OAuth device flow...");
+            match run_github_device_flow(None).await {
+                Ok(Some(token)) => {
+                    let token_path = github_token_path();
+                    if let Some(parent) = token_path.parent() {
+                        let _ = std::fs::create_dir_all(parent);
+                    }
+                    let _ = std::fs::write(&token_path, &token);
+                    println!("✅ GitHub token saved to {}", token_path.display());
+                    println!("   Add to config.toml:");
+                    println!("   [providers.github_copilot]");
+                    println!("   type = \"github_copilot\"");
+                    println!("   token = \"{}...\"", &token[..token.len().min(8)]);
+                }
+                Ok(None) => println!("Authentication cancelled."),
+                Err(e) => eprintln!("Auth error: {e}"),
+            }
+        }
+        "codex" | "codex_oauth" | "chatgpt" => {
+            println!("Starting ChatGPT / Codex OAuth device flow...");
+            let token_path = codex_token_path();
+            match run_codex_device_flow(Some(token_path.clone())).await {
+                Ok(Some((access_token, _refresh_token))) => {
+                    println!("✅ Codex tokens saved to {}", token_path.display());
+                    println!("   Add to config.toml:");
+                    println!("   [providers.codex_oauth]");
+                    println!("   type = \"codex_oauth\"");
+                    println!("   # (tokens auto-loaded from {})", token_path.display());
+                    let masked = if access_token.len() > 8 {
+                        format!("{}...", &access_token[..8])
+                    } else {
+                        "****".to_string()
+                    };
+                    println!("   # access_token: {masked}");
+                }
+                Ok(None) => println!("Authentication cancelled."),
+                Err(e) => eprintln!("Auth error: {e}"),
+            }
+        }
+        other => {
+            eprintln!("Unknown auth provider: {other}");
+            eprintln!("Supported: github, codex, anthropic, openai, gemini");
+            eprintln!();
+            eprintln!("For API key providers, set the key in your config.toml or as environment variable:");
+            eprintln!("  ANTHROPIC_API_KEY, OPENAI_API_KEY, GEMINI_API_KEY");
+        }
+    }
+    Ok(())
+}
+
+fn github_token_path() -> PathBuf {
+    dirs::config_dir()
+        .unwrap_or_else(|| PathBuf::from("."))
+        .join("yolo-router")
+        .join("github_token")
+}
+
+fn codex_token_path() -> PathBuf {
+    dirs::config_dir()
+        .unwrap_or_else(|| PathBuf::from("."))
+        .join("yolo-router")
+        .join("codex_oauth.json")
+}
+
 
