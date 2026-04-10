@@ -58,8 +58,9 @@ impl Provider for AnthropicProvider {
         let data: Value = response.json().await
             .map_err(|e| crate::error::YoloRouterError::HttpError(e))?;
 
-        let content = data["content"][0]["text"]
-            .as_str()
+        let content = data["content"]
+            .get(0)
+            .and_then(|c| c["text"].as_str())
             .unwrap_or("No response")
             .to_string();
 

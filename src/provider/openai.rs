@@ -57,8 +57,9 @@ impl Provider for OpenAIProvider {
         let data: Value = response.json().await
             .map_err(|e| crate::error::YoloRouterError::HttpError(e))?;
 
-        let content = data["choices"][0]["message"]["content"]
-            .as_str()
+        let content = data["choices"]
+            .get(0)
+            .and_then(|c| c["message"]["content"].as_str())
             .unwrap_or("No response")
             .to_string();
 

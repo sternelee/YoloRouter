@@ -57,8 +57,10 @@ impl Provider for GeminiProvider {
         let data: Value = response.json().await
             .map_err(|e| crate::error::YoloRouterError::HttpError(e))?;
 
-        let content = data["candidates"][0]["content"]["parts"][0]["text"]
-            .as_str()
+        let content = data["candidates"]
+            .get(0)
+            .and_then(|c| c["content"]["parts"].get(0))
+            .and_then(|p| p["text"].as_str())
             .unwrap_or("No response")
             .to_string();
 
