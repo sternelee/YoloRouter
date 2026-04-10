@@ -1,0 +1,80 @@
+[daemon]
+port = 8080
+log_level = "info"
+
+# Provider configuration
+[providers.anthropic]
+type = "anthropic"
+api_key = "${ANTHROPIC_API_KEY}"
+base_url = "https://api.anthropic.com"
+
+[providers.openai]
+type = "openai"
+api_key = "${OPENAI_API_KEY}"
+base_url = "https://api.openai.com/v1"
+
+[providers.gemini]
+type = "gemini"
+api_key = "${GEMINI_API_KEY}"
+base_url = "https://generativelanguage.googleapis.com"
+
+[providers.github]
+type = "github"
+auth_type = "token"
+token = "${GITHUB_TOKEN}"
+
+# Scenario definitions - route different tasks to different models
+[scenarios.coding]
+default_tier = "high"
+
+[[scenarios.coding.models]]
+provider = "anthropic"
+model = "claude-opus"
+cost_tier = "high"
+capabilities = ["reasoning", "code-analysis", "complex-problems"]
+
+[[scenarios.coding.models]]
+provider = "openai"
+model = "gpt-4"
+cost_tier = "high"
+capabilities = ["code", "reasoning"]
+fallback_to = "gpt-3.5-turbo"
+
+[[scenarios.coding.models]]
+provider = "openai"
+model = "gpt-3.5-turbo"
+cost_tier = "low"
+capabilities = ["code", "basic-reasoning"]
+
+[scenarios.simple_task]
+default_tier = "low"
+
+[[scenarios.simple_task.models]]
+provider = "openai"
+model = "gpt-3.5-turbo"
+cost_tier = "low"
+
+[[scenarios.simple_task.models]]
+provider = "anthropic"
+model = "claude-haiku"
+cost_tier = "low"
+
+[scenarios.analysis]
+default_tier = "medium"
+
+[[scenarios.analysis.models]]
+provider = "anthropic"
+model = "claude-sonnet"
+cost_tier = "medium"
+capabilities = ["analysis", "reasoning"]
+
+[[scenarios.analysis.models]]
+provider = "openai"
+model = "gpt-4"
+cost_tier = "high"
+
+# Global routing configuration
+[routing]
+fallback_enabled = true
+timeout_ms = 30000
+retry_count = 2

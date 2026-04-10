@@ -1,0 +1,22 @@
+mod anthropic;
+pub mod openai;
+pub mod gemini;
+pub mod generic;
+pub mod factory;
+
+pub use anthropic::AnthropicProvider;
+pub use openai::OpenAIProvider;
+pub use gemini::GeminiProvider;
+pub use generic::GenericProvider;
+pub use factory::ProviderFactory;
+
+use crate::models::{ChatRequest, ChatResponse};
+use crate::Result;
+use async_trait::async_trait;
+
+#[async_trait]
+pub trait Provider: Send + Sync {
+    async fn send_request(&self, request: &ChatRequest) -> Result<ChatResponse>;
+    fn name(&self) -> &str;
+    fn model_list(&self) -> Vec<String>;
+}
