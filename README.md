@@ -21,11 +21,27 @@ YoloRouter 是一个强大的 AI 模型路由代理，允许你：
 
 ### 支持的 AI 供应商
 
-- **Anthropic Claude** - claude-opus, claude-sonnet, claude-haiku
-- **OpenAI** - gpt-4, gpt-3.5-turbo, 等
-- **Google Gemini** - gemini-pro
-- **GitHub Codex** - 代码补全
-- **自定义提供商** - 通用 API 支持
+**原生支持（内置认证）：**
+- **Anthropic Claude** — claude-opus, claude-sonnet, claude-haiku
+- **OpenAI** — gpt-4o, gpt-4, gpt-3.5-turbo 等
+- **Google Gemini** — gemini-2.0-flash, gemini-pro 等
+- **GitHub Copilot** — OAuth 设备流认证，Copilot Pro 订阅免费使用
+- **ChatGPT Pro (Codex OAuth)** — OAuth 设备流认证，ChatGPT Pro 订阅免费使用
+- **Azure OpenAI** — 企业级部署支持
+
+**OpenAI 兼容（所有支持 `/v1/chat/completions` 的服务）：**
+- **OpenRouter** — 统一访问 100+ 模型，含大量免费模型
+- **Groq** — 超快推理（LLaMA、Mixtral）
+- **DeepSeek** — 高性价比编程/推理模型
+- **Mistral AI** — 欧洲开源模型
+- **Together.ai** — 开源模型托管
+- **Perplexity** — 联网搜索增强模型
+- **硅基流动 SiliconFlow** — 国内访问，含免费额度
+- **月之暗面 Kimi** — 长上下文中文模型
+- **智谱 GLM** — 中文大模型
+- **Ollama** — 本地模型运行（完全离线）
+- **LM Studio** — 本地模型 GUI
+- **任意 OpenAI 兼容 API** — 通用 `openai` type + `base_url`
 
 ## 快速开始
 
@@ -192,22 +208,24 @@ curl http://127.0.0.1:8080/stats
 }
 ```
 
-## API 端点
+### API 端点
 
-### 供应商特定端点
+### 协议适配端点（Protocol Adapters）
 
-| 端点 | 说明 |
-|------|------|
-| `POST /v1/anthropic` | Anthropic Claude |
-| `POST /v1/openai` | OpenAI GPT |
-| `POST /v1/gemini` | Google Gemini |
-| `POST /v1/codex` | GitHub Codex |
+这些端点接受不同 AI 客户端的原生请求格式，路由决策由路由引擎统一处理：
 
-### 智能路由
+| 端点 | 适配格式 | 适用客户端 |
+|------|---------|-----------|
+| `POST /v1/anthropic` | Anthropic Messages API | Claude Code, Cursor |
+| `POST /v1/anthropic/v1/messages` | 同上（完整路径）| 同上 |
+| `POST /v1/openai` | OpenAI Chat Completions | OpenAI SDK, ChatGPT clients |
+| `POST /v1/openai/chat/completions` | 同上（完整路径）| 同上 |
+| `POST /v1/codex` | OpenAI 格式 | Codex CLI |
+| `POST /v1/codex/chat/completions` | 同上（完整路径）| 同上 |
+| `POST /v1/gemini` | OpenAI 兼容格式 | Gemini 客户端 |
+| `POST /v1/auto` | OpenAI 格式 | 通用，15 维自动路由 |
 
-| 端点 | 说明 |
-|------|------|
-| `POST /v1/auto` | 自动检测场景并路由 |
+> **注意**：端点名称决定的是**协议格式**，不是目标 provider。实际使用哪个 provider/model 由路由引擎（场景匹配或 TUI 覆盖）决定。
 
 ### 管理端点
 
@@ -216,6 +234,26 @@ curl http://127.0.0.1:8080/stats
 | `GET /health` | 健康检查 |
 | `GET /config` | 查看当前配置 |
 | `GET /stats` | 查看统计数据 |
+| `GET /control/status` | 当前路由覆盖状态 |
+| `POST /control/override` | 设置路由覆盖（见下方） |
+| `DELETE /control/override/{ep}` | 清除覆盖，恢复自动 |
+
+**设置路由覆盖：**
+
+```bash
+# 将所有请求固定到 coding 场景
+curl -X POST http://127.0.0.1:8080/control/override \
+  -H "Content-Type: application/json" \
+  -d '{"endpoint":"global","scenario":"coding"}'
+
+# 只将 anthropic 端点固定到 reasoning 场景
+curl -X POST http://127.0.0.1:8080/control/override \
+  -H "Content-Type: application/json" \
+  -d '{"endpoint":"anthropic","scenario":"reasoning"}'
+
+# 恢复自动路由
+curl -X DELETE http://127.0.0.1:8080/control/override/global
+```
 
 ### 请求格式
 
@@ -327,43 +365,152 @@ YoloRouter/
 
 ## 配置详解
 
-### 提供商配置
+### Provider 配置
+
+所有 provider 支持 `${ENV_VAR}` 环境变量展开。
+
+#### 内置 Provider
 
 ```toml
+# Anthropic
 [providers.anthropic]
 type = "anthropic"
-api_key = "${ANTHROPIC_API_KEY}"  # 或直接填写密钥
+api_key = "${ANTHROPIC_API_KEY}"
 
+# OpenAI
 [providers.openai]
 type = "openai"
 api_key = "${OPENAI_API_KEY}"
 
+# Google Gemini
 [providers.gemini]
 type = "gemini"
 api_key = "${GEMINI_API_KEY}"
 
-[providers.github]
-type = "github"
-token = "${GITHUB_TOKEN}"
+# GitHub Copilot（OAuth 后自动加载 token）
+# 先运行: yolo-router --auth github
+[providers.github_copilot]
+type = "github_copilot"
+
+# ChatGPT Pro / Codex OAuth（OAuth 后自动加载 token）
+# 先运行: yolo-router --auth codex
+[providers.codex_oauth]
+type = "codex_oauth"
+
+# Azure OpenAI
+[providers.azure]
+type = "codex"
+api_key = "${AZURE_OPENAI_API_KEY}"
+[providers.azure.extra]
+azure_endpoint = "https://your-resource.openai.azure.com"
+api_version = "2024-02-01"
 ```
+
+#### OpenAI 兼容的三方 Provider
+
+任何支持 OpenAI `/v1/chat/completions` 接口的服务都可用 `type = "openai"` + `base_url` 配置：
+
+```toml
+# OpenRouter（100+ 模型，含大量免费）
+[providers.openrouter]
+type = "openai"
+base_url = "https://openrouter.ai/api/v1"
+api_key = "${OPENROUTER_API_KEY}"
+
+# Groq（超快推理）
+[providers.groq]
+type = "openai"
+base_url = "https://api.groq.com/openai/v1"
+api_key = "${GROQ_API_KEY}"
+
+# DeepSeek（高性价比编程/推理）
+[providers.deepseek]
+type = "openai"
+base_url = "https://api.deepseek.com/v1"
+api_key = "${DEEPSEEK_API_KEY}"
+
+# Mistral AI
+[providers.mistral]
+type = "openai"
+base_url = "https://api.mistral.ai/v1"
+api_key = "${MISTRAL_API_KEY}"
+
+# Together.ai
+[providers.together]
+type = "openai"
+base_url = "https://api.together.xyz/v1"
+api_key = "${TOGETHER_API_KEY}"
+
+# Perplexity（联网搜索）
+[providers.perplexity]
+type = "openai"
+base_url = "https://api.perplexity.ai"
+api_key = "${PERPLEXITY_API_KEY}"
+
+# 硅基流动 SiliconFlow（国内，含免费额度）
+[providers.siliconflow]
+type = "openai"
+base_url = "https://api.siliconflow.cn/v1"
+api_key = "${SILICONFLOW_API_KEY}"
+
+# 月之暗面 Kimi（长上下文中文）
+[providers.kimi]
+type = "openai"
+base_url = "https://api.moonshot.cn/v1"
+api_key = "${MOONSHOT_API_KEY}"
+
+# 智谱 GLM
+[providers.zhipu]
+type = "openai"
+base_url = "https://open.bigmodel.cn/api/paas/v4"
+api_key = "${ZHIPU_API_KEY}"
+
+# 本地 Ollama（完全离线）
+[providers.ollama]
+type = "openai"
+base_url = "http://localhost:11434/v1"
+api_key = "ollama"
+
+# 本地 LM Studio
+[providers.lmstudio]
+type = "openai"
+base_url = "http://localhost:1234/v1"
+api_key = "lm-studio"
+```
+
+#### Provider Type 速查表
+
+| 接口类型 | `type` 值 | 必填字段 |
+|---------|----------|---------|
+| Anthropic Messages API | `anthropic` | `api_key` |
+| OpenAI / 任何兼容接口 | `openai` | `api_key` + `base_url`（非官方必填）|
+| Google Gemini | `gemini` | `api_key` |
+| GitHub Copilot（订阅）| `github_copilot` | 无（OAuth 后自动加载）|
+| ChatGPT Pro（订阅）| `codex_oauth` | 无（OAuth 后自动加载）|
+| Azure OpenAI | `codex` | `api_key` + extra.azure_endpoint |
+| 其他任意兼容接口 | 任意名称 | `api_key` + `base_url` |
 
 ### 场景定义
 
 ```toml
 [scenarios.production_code]
 models = [
-  { provider = "anthropic", model = "claude-opus", cost_tier = "high" },
-  { provider = "openai", model = "gpt-4", cost_tier = "high" },
-  { provider = "anthropic", model = "claude-sonnet", cost_tier = "medium" }
+  { provider = "github_copilot", model = "claude-sonnet-4-6", cost_tier = "low" },
+  { provider = "codex_oauth", model = "gpt-5.4", cost_tier = "low" },
+  { provider = "anthropic", model = "claude-opus-4-5", cost_tier = "high" }
 ]
-default_tier = "high"
+default_tier = "low"
+match_task_types = ["coding"]
+priority = 100
 
 [scenarios.budget_mode]
 models = [
-  { provider = "openai", model = "gpt-3.5-turbo", cost_tier = "low" },
-  { provider = "gemini", model = "gemini-pro", cost_tier = "low" }
+  { provider = "openrouter", model = "meta-llama/llama-3.1-8b-instruct:free", cost_tier = "low" },
+  { provider = "groq", model = "llama-3.3-70b-versatile", cost_tier = "low" },
+  { provider = "ollama", model = "qwen2.5:7b", cost_tier = "low" }
 ]
 default_tier = "low"
+is_default = true
 ```
 
 ### 路由配置
@@ -373,6 +520,7 @@ default_tier = "low"
 fallback_enabled = true        # 启用故障转移
 timeout_ms = 30000             # 请求超时
 retry_count = 2                # 失败重试次数
+confidence_threshold = 0.6     # 自动路由最低置信度
 ```
 
 ## 最佳实践

@@ -77,7 +77,11 @@ log_level = "info"            # 日志级别：debug, info, warn, error
 
 ### 提供商配置
 
-#### Anthropic Claude
+所有 `api_key`/`token` 字段支持 `${ENV_VAR}` 环境变量展开。
+
+#### 内置 Provider
+
+##### Anthropic Claude
 
 ```toml
 [providers.anthropic]
@@ -87,7 +91,7 @@ api_key = "${ANTHROPIC_API_KEY}"
 
 获取 API 密钥：https://console.anthropic.com/account/keys
 
-#### OpenAI
+##### OpenAI
 
 ```toml
 [providers.openai]
@@ -97,7 +101,7 @@ api_key = "${OPENAI_API_KEY}"
 
 获取 API 密钥：https://platform.openai.com/account/api-keys
 
-#### Google Gemini
+##### Google Gemini
 
 ```toml
 [providers.gemini]
@@ -107,15 +111,174 @@ api_key = "${GEMINI_API_KEY}"
 
 获取 API 密钥：https://makersuite.google.com/app/apikey
 
-#### GitHub / Codex
+##### GitHub Copilot（订阅免费）
 
 ```toml
-[providers.github]
-type = "github"
-token = "${GITHUB_TOKEN}"
+[providers.github_copilot]
+type = "github_copilot"
+# token 通过 OAuth 自动加载，无需手动填写
+# 也可强制指定: token = "${GITHUB_COPILOT_TOKEN}"
 ```
 
-获取 Token：https://github.com/settings/tokens
+认证流程：`yolo-router --auth github`（TUI 引导完成设备流 OAuth）
+
+##### ChatGPT Pro / Codex OAuth（订阅免费）
+
+```toml
+[providers.codex_oauth]
+type = "codex_oauth"
+# token 通过 OAuth 自动加载，存储在 ~/.config/yolo-router/codex_oauth.json
+```
+
+认证流程：`yolo-router --auth codex`（TUI 引导完成设备流 OAuth）
+
+##### Azure OpenAI
+
+```toml
+[providers.azure]
+type = "codex"
+api_key = "${AZURE_OPENAI_API_KEY}"
+[providers.azure.extra]
+azure_endpoint = "https://your-resource.openai.azure.com"
+api_version = "2024-02-01"
+```
+
+---
+
+#### OpenAI 兼容的三方 Provider
+
+任何支持 OpenAI `/v1/chat/completions` 接口的服务均可用 `type = "openai"` + `base_url` 接入：
+
+##### OpenRouter（推荐，100+ 模型含大量免费）
+
+```toml
+[providers.openrouter]
+type = "openai"
+base_url = "https://openrouter.ai/api/v1"
+api_key = "${OPENROUTER_API_KEY}"
+```
+
+注册：https://openrouter.ai — 免费额度无需信用卡
+
+##### Groq（超快推理，有免费层）
+
+```toml
+[providers.groq]
+type = "openai"
+base_url = "https://api.groq.com/openai/v1"
+api_key = "${GROQ_API_KEY}"
+```
+
+可用模型：`llama-3.3-70b-versatile`、`mixtral-8x7b-32768`、`gemma2-9b-it`
+
+##### DeepSeek（高性价比，编程/推理强）
+
+```toml
+[providers.deepseek]
+type = "openai"
+base_url = "https://api.deepseek.com/v1"
+api_key = "${DEEPSEEK_API_KEY}"
+```
+
+可用模型：`deepseek-chat`、`deepseek-coder`、`deepseek-reasoner`
+
+##### Mistral AI
+
+```toml
+[providers.mistral]
+type = "openai"
+base_url = "https://api.mistral.ai/v1"
+api_key = "${MISTRAL_API_KEY}"
+```
+
+可用模型：`mistral-large-latest`、`mistral-small-latest`、`open-mistral-7b`
+
+##### Together.ai（开源模型托管）
+
+```toml
+[providers.together]
+type = "openai"
+base_url = "https://api.together.xyz/v1"
+api_key = "${TOGETHER_API_KEY}"
+```
+
+##### Perplexity（联网搜索增强）
+
+```toml
+[providers.perplexity]
+type = "openai"
+base_url = "https://api.perplexity.ai"
+api_key = "${PERPLEXITY_API_KEY}"
+```
+
+可用模型：`sonar`、`sonar-pro`（含实时联网）
+
+##### 硅基流动 SiliconFlow（国内，免费额度）
+
+```toml
+[providers.siliconflow]
+type = "openai"
+base_url = "https://api.siliconflow.cn/v1"
+api_key = "${SILICONFLOW_API_KEY}"
+```
+
+可用模型：`Qwen/Qwen2.5-72B-Instruct`、`deepseek-ai/DeepSeek-V3`（部分免费）
+
+##### 月之暗面 Kimi（长上下文，中文优化）
+
+```toml
+[providers.kimi]
+type = "openai"
+base_url = "https://api.moonshot.cn/v1"
+api_key = "${MOONSHOT_API_KEY}"
+```
+
+可用模型：`moonshot-v1-8k`、`moonshot-v1-32k`、`moonshot-v1-128k`
+
+##### 智谱 GLM
+
+```toml
+[providers.zhipu]
+type = "openai"
+base_url = "https://open.bigmodel.cn/api/paas/v4"
+api_key = "${ZHIPU_API_KEY}"
+```
+
+可用模型：`glm-4-flash`（免费）、`glm-4-plus`
+
+##### 本地 Ollama（完全离线）
+
+```toml
+[providers.ollama]
+type = "openai"
+base_url = "http://localhost:11434/v1"
+api_key = "ollama"   # Ollama 不校验，随意填
+```
+
+先安装 Ollama：https://ollama.ai，然后 `ollama pull qwen2.5:7b`
+
+##### 本地 LM Studio
+
+```toml
+[providers.lmstudio]
+type = "openai"
+base_url = "http://localhost:1234/v1"
+api_key = "lm-studio"
+```
+
+---
+
+#### Provider Type 速查表
+
+| 接口类型 | `type` 值 | 必填字段 |
+|---------|----------|---------|
+| Anthropic Messages API | `anthropic` | `api_key` |
+| OpenAI / 任何 OAI 兼容 | `openai` | `api_key` + `base_url`（官方可省）|
+| Google Gemini | `gemini` | `api_key` |
+| GitHub Copilot（Pro 订阅）| `github_copilot` | 无（OAuth 后自动加载）|
+| ChatGPT Pro（Pro 订阅）| `codex_oauth` | 无（OAuth 后自动加载）|
+| Azure OpenAI | `codex` | `api_key` + `extra.azure_endpoint` |
+| 其他任意兼容 API | 任意名称 | `api_key` + `base_url` |
 
 ### 场景定义
 
@@ -152,30 +315,50 @@ retry_count = 2               # 失败重试次数
 
 ## API 端点
 
-### 提供商特定端点
+### 协议适配端点（Protocol Adapters）
 
-通过这些端点直接请求特定提供商：
+端点名决定**请求/响应格式**，不决定使用哪个 provider。实际 provider 由路由引擎选择。
 
-- `POST /v1/anthropic` - Anthropic Claude
-- `POST /v1/openai` - OpenAI GPT
-- `POST /v1/gemini` - Google Gemini
-- `POST /v1/codex` - GitHub Codex
-
-### 智能路由端点
-
-```
-POST /v1/auto
-```
-
-基于请求内容自动检测场景并路由。
+| 端点 | 适配格式 | 适用客户端 |
+|------|---------|-----------|
+| `POST /v1/anthropic` | Anthropic Messages API | Claude Code, Cursor |
+| `POST /v1/anthropic/v1/messages` | 同上（完整路径）| 同上 |
+| `POST /v1/openai` | OpenAI Chat Completions | OpenAI SDK |
+| `POST /v1/openai/chat/completions` | 同上（完整路径）| 同上 |
+| `POST /v1/codex` | OpenAI 格式 | Codex CLI |
+| `POST /v1/codex/chat/completions` | 同上（完整路径）| 同上 |
+| `POST /v1/gemini` | OpenAI 兼容格式 | Gemini 客户端 |
+| `POST /v1/auto` | OpenAI 格式 | 通用，15 维自动路由 |
 
 ### 管理端点
 
 ```
-GET /health          # 健康检查
-GET /config          # 查看当前配置
-GET /stats           # 查看请求统计
+GET  /health                         健康检查
+GET  /config                         查看当前配置
+GET  /stats                          请求统计
+GET  /control/status                 当前路由覆盖状态
+POST /control/override               设置路由覆盖
+DELETE /control/override/{endpoint}  清除覆盖
 ```
+
+**路由覆盖示例：**
+
+```bash
+# 全局固定到 coding 场景
+curl -X POST http://127.0.0.1:8080/control/override \
+  -H "Content-Type: application/json" \
+  -d '{"endpoint":"global","scenario":"coding"}'
+
+# 只将 anthropic 端点固定到 reasoning 场景
+curl -X POST http://127.0.0.1:8080/control/override \
+  -H "Content-Type: application/json" \
+  -d '{"endpoint":"anthropic","scenario":"reasoning"}'
+
+# 恢复自动路由
+curl -X DELETE http://127.0.0.1:8080/control/override/global
+```
+
+也可在 TUI 的 Scenarios 标签页按 `Enter` 固定场景，按 `a` 恢复自动。
 
 ## 请求格式
 
