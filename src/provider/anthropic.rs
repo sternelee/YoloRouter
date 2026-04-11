@@ -32,13 +32,32 @@ impl AnthropicProvider {
 impl Provider for AnthropicProvider {
     async fn send_request(&self, request: &ChatRequest) -> Result<ChatResponse> {
         let url = format!("{}/v1/messages", self.base_url);
-        
-        let payload = json!({
+
+        // Separate system messages from the conversation
+        let system: Option<String> = request.system.clone().or_else(|| {
+            request
+                .messages
+                .iter()
+                .find(|m| m.role == "system")
+                .map(|m| m.content.clone())
+        });
+
+        let messages: Vec<_> = request
+            .messages
+            .iter()
+            .filter(|m| m.role != "system")
+            .collect();
+
+        let mut payload = json!({
             "model": request.model,
             "max_tokens": request.max_tokens.unwrap_or(2048),
-            "messages": request.messages,
+            "messages": messages,
             "temperature": request.temperature.unwrap_or(0.7),
         });
+
+        if let Some(sys) = system {
+            payload["system"] = json!(sys);
+        }
 
         let response = self.client
             .post(&url)

@@ -37,12 +37,12 @@ impl ProviderRegistry {
 
     pub fn from_config(config: &Config) -> Result<Self> {
         let mut registry = Self::new();
-        
-        for (name, provider_config) in config.providers() {
+        for name in config.providers().keys() {
+            // get_provider() applies ${ENV_VAR} expansion
+            let provider_config = config.get_provider(&name)?;
             let provider = ProviderFactory::create_provider(&name, &provider_config)?;
-            registry.providers.insert(name, provider);
+            registry.providers.insert(name.to_string(), provider);
         }
-
         Ok(registry)
     }
 

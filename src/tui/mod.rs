@@ -19,6 +19,8 @@ use ratatui::{
     Terminal,
 };
 use std::io;
+use std::sync::mpsc;
+use std::time::Duration;
 use crate::config::Config;
 
 // ─── Tab Index ───────────────────────────────────────────────────────────────
@@ -58,6 +60,14 @@ impl ActiveTab {
     }
 }
 
+// ─── Override command sent from TUI to background HTTP task ──────────────────
+
+#[derive(Debug)]
+pub struct OverrideCommand {
+    pub endpoint: String,
+    pub scenario: Option<String>, // None = reset to auto
+}
+
 // ─── TuiApp State ────────────────────────────────────────────────────────────
 
 struct TuiApp {
@@ -66,15 +76,31 @@ struct TuiApp {
     config_path: String,
     provider_list_state: ListState,
     scenario_list_state: ListState,
+    /// Sorted, stable scenario names for index-stable selection
+    scenario_names: Vec<String>,
     status_message: String,
+    /// Active override label for display (updated via HTTP result channel)
+    active_override: Option<String>,
+    /// Send override commands to the async HTTP task
+    cmd_tx: tokio::sync::mpsc::Sender<OverrideCommand>,
+    /// Receive results/status messages from the async HTTP task
+    status_rx: mpsc::Receiver<String>,
 }
 
 impl TuiApp {
-    fn new(config: Config, config_path: String) -> Self {
+    fn new(
+        config: Config,
+        config_path: String,
+        cmd_tx: tokio::sync::mpsc::Sender<OverrideCommand>,
+        status_rx: mpsc::Receiver<String>,
+    ) -> Self {
         let mut provider_list_state = ListState::default();
         provider_list_state.select(Some(0));
         let mut scenario_list_state = ListState::default();
         scenario_list_state.select(Some(0));
+
+        let mut scenario_names: Vec<String> = config.scenarios().keys().cloned().collect();
+        scenario_names.sort();
 
         Self {
             tab: ActiveTab::Status,
@@ -82,7 +108,11 @@ impl TuiApp {
             config_path,
             provider_list_state,
             scenario_list_state,
-            status_message: "Ready. Press Tab/Shift+Tab to switch tabs, q to quit.".to_string(),
+            scenario_names,
+            status_message: "Ready. Tab/Shift+Tab: switch tabs  |  Scenarios: Enter=pin, a=auto  |  q=quit".to_string(),
+            active_override: None,
+            cmd_tx,
+            status_rx,
         }
     }
 }
@@ -103,9 +133,51 @@ impl TuiManager {
     }
 
     pub async fn run(&self, config: Config, config_path: String) {
-        if let Err(e) = run_tui(config, config_path) {
-            eprintln!("TUI error: {e}");
-        }
+        let port = config.daemon().port;
+        let (cmd_tx, mut cmd_rx) = tokio::sync::mpsc::channel::<OverrideCommand>(16);
+        let (status_tx, status_rx) = mpsc::channel::<String>();
+
+        // Background async task: receives override commands, sends HTTP to daemon
+        tokio::spawn(async move {
+            let client = reqwest::Client::new();
+            while let Some(cmd) = cmd_rx.recv().await {
+                let url = format!("http://127.0.0.1:{}/control/override", port);
+                let body = serde_json::json!({
+                    "endpoint": cmd.endpoint,
+                    "scenario": cmd.scenario,
+                });
+                let result = match client
+                    .post(&url)
+                    .json(&body)
+                    .timeout(Duration::from_secs(2))
+                    .send()
+                    .await
+                {
+                    Ok(resp) if resp.status().is_success() => {
+                        let label = cmd.scenario.as_deref().unwrap_or("auto");
+                        format!("✅ {} → {}", cmd.endpoint, label)
+                    }
+                    Ok(resp) => format!("❌ Override failed: HTTP {}", resp.status()),
+                    Err(e) => {
+                        if e.is_timeout() || e.is_connect() {
+                            "⚠️  Daemon offline — start daemon first (yolo-router)".to_string()
+                        } else {
+                            format!("❌ {}", e)
+                        }
+                    }
+                };
+                let _ = status_tx.send(result);
+            }
+        });
+
+        // Run blocking TUI in a dedicated OS thread
+        tokio::task::spawn_blocking(move || {
+            if let Err(e) = run_tui(config, config_path, cmd_tx, status_rx) {
+                eprintln!("TUI error: {e}");
+            }
+        })
+        .await
+        .ok();
     }
 }
 
@@ -127,9 +199,14 @@ fn restore_terminal(terminal: &mut Terminal<CrosstermBackend<io::Stdout>>) {
 
 // ─── Main event loop ─────────────────────────────────────────────────────────
 
-fn run_tui(config: Config, config_path: String) -> io::Result<()> {
+fn run_tui(
+    config: Config,
+    config_path: String,
+    cmd_tx: tokio::sync::mpsc::Sender<OverrideCommand>,
+    status_rx: mpsc::Receiver<String>,
+) -> io::Result<()> {
     let mut terminal = setup_terminal()?;
-    let mut app = TuiApp::new(config, config_path);
+    let mut app = TuiApp::new(config, config_path, cmd_tx, status_rx);
     let result = event_loop(&mut terminal, &mut app);
     restore_terminal(&mut terminal);
     result
@@ -140,20 +217,33 @@ fn event_loop(
     app: &mut TuiApp,
 ) -> io::Result<()> {
     loop {
+        // Drain any HTTP result messages before redraw
+        while let Ok(msg) = app.status_rx.try_recv() {
+            // Parse override label from success message (e.g. "✅ global → coding")
+            if msg.starts_with("✅") {
+                if let Some(arrow) = msg.find('→') {
+                    app.active_override = Some(msg[arrow + 2..].trim().to_string());
+                }
+            }
+            app.status_message = msg;
+        }
+
         terminal.draw(|f| draw_ui(f, app))?;
 
-        if let Event::Key(key) = event::read()? {
-            // Global keys
-            match (key.code, key.modifiers) {
-                (KeyCode::Char('q'), _) | (KeyCode::Char('c'), KeyModifiers::CONTROL) => break,
-                (KeyCode::Tab, _) => app.tab = app.tab.next(),
-                (KeyCode::BackTab, _) => app.tab = app.tab.prev(),
-                (KeyCode::Char('1'), _) => app.tab = ActiveTab::Status,
-                (KeyCode::Char('2'), _) => app.tab = ActiveTab::Providers,
-                (KeyCode::Char('3'), _) => app.tab = ActiveTab::Scenarios,
-                (KeyCode::Char('4'), _) => app.tab = ActiveTab::Auth,
-                (KeyCode::Char('5'), _) => app.tab = ActiveTab::Help,
-                _ => handle_tab_key(app, key.code),
+        // Non-blocking poll so the UI stays responsive and status_rx is checked regularly
+        if event::poll(Duration::from_millis(200))? {
+            if let Event::Key(key) = event::read()? {
+                match (key.code, key.modifiers) {
+                    (KeyCode::Char('q'), _) | (KeyCode::Char('c'), KeyModifiers::CONTROL) => break,
+                    (KeyCode::Tab, _) => app.tab = app.tab.next(),
+                    (KeyCode::BackTab, _) => app.tab = app.tab.prev(),
+                    (KeyCode::Char('1'), _) => app.tab = ActiveTab::Status,
+                    (KeyCode::Char('2'), _) => app.tab = ActiveTab::Providers,
+                    (KeyCode::Char('3'), _) => app.tab = ActiveTab::Scenarios,
+                    (KeyCode::Char('4'), _) => app.tab = ActiveTab::Auth,
+                    (KeyCode::Char('5'), _) => app.tab = ActiveTab::Help,
+                    _ => handle_tab_key(app, key.code),
+                }
             }
         }
     }
@@ -179,17 +269,51 @@ fn handle_tab_key(app: &mut TuiApp, key: KeyCode) {
             }
         }
         ActiveTab::Scenarios => {
-            let scenarios: Vec<_> = app.config.scenarios().keys().cloned().collect();
+            let count = app.scenario_names.len();
             match key {
                 KeyCode::Down | KeyCode::Char('j') => {
                     let i = app.scenario_list_state.selected().unwrap_or(0);
-                    let next = if scenarios.is_empty() { 0 } else { (i + 1) % scenarios.len() };
+                    let next = if count == 0 { 0 } else { (i + 1) % count };
                     app.scenario_list_state.select(Some(next));
                 }
                 KeyCode::Up | KeyCode::Char('k') => {
                     let i = app.scenario_list_state.selected().unwrap_or(0);
-                    let prev = if i == 0 { scenarios.len().saturating_sub(1) } else { i - 1 };
+                    let prev = if i == 0 { count.saturating_sub(1) } else { i - 1 };
                     app.scenario_list_state.select(Some(prev));
+                }
+                KeyCode::Enter => {
+                    if let Some(i) = app.scenario_list_state.selected() {
+                        if let Some(name) = app.scenario_names.get(i).cloned() {
+                            let cmd = OverrideCommand {
+                                endpoint: "global".to_string(),
+                                scenario: Some(name.clone()),
+                            };
+                            match app.cmd_tx.try_send(cmd) {
+                                Ok(_) => {
+                                    app.status_message =
+                                        format!("Sending override: global → {}…", name);
+                                }
+                                Err(_) => {
+                                    app.status_message = "⚠️  Request queue full, try again".to_string();
+                                }
+                            }
+                        }
+                    }
+                }
+                KeyCode::Char('a') => {
+                    let cmd = OverrideCommand {
+                        endpoint: "global".to_string(),
+                        scenario: None,
+                    };
+                    match app.cmd_tx.try_send(cmd) {
+                        Ok(_) => {
+                            app.status_message = "Sending reset: global → auto…".to_string();
+                            app.active_override = Some("auto".to_string());
+                        }
+                        Err(_) => {
+                            app.status_message = "⚠️  Request queue full, try again".to_string();
+                        }
+                    }
                 }
                 _ => {}
             }
@@ -253,6 +377,11 @@ fn draw_status(f: &mut ratatui::Frame, app: &TuiApp, area: ratatui::layout::Rect
     let routing = app.config.routing();
     let daemon = app.config.daemon();
 
+    let override_label = app
+        .active_override
+        .as_deref()
+        .unwrap_or("auto (analyzer)");
+
     let lines = vec![
         Line::from(vec![
             Span::styled("Config: ", Style::default().fg(Color::Cyan)),
@@ -261,11 +390,17 @@ fn draw_status(f: &mut ratatui::Frame, app: &TuiApp, area: ratatui::layout::Rect
         Line::from(""),
         Line::from(vec![
             Span::styled("Daemon Port:   ", Style::default().fg(Color::Cyan)),
-            Span::raw(daemon.port.to_string()),
+            Span::raw(format!("127.0.0.1:{}  (POST /control/override to switch)", daemon.port)),
         ]),
         Line::from(vec![
             Span::styled("Log Level:     ", Style::default().fg(Color::Cyan)),
             Span::raw(&daemon.log_level),
+        ]),
+        Line::from(""),
+        Line::from(vec![
+            Span::styled("Active Routing:", Style::default().fg(Color::Yellow).add_modifier(Modifier::BOLD)),
+            Span::raw(" "),
+            Span::styled(override_label, Style::default().fg(Color::Green)),
         ]),
         Line::from(""),
         Line::from(vec![
@@ -370,27 +505,48 @@ fn draw_scenarios(f: &mut ratatui::Frame, app: &mut TuiApp, area: ratatui::layou
         .split(area);
 
     let scenarios = app.config.scenarios();
-    let items: Vec<ListItem> = scenarios
+    // Use stable sorted names from app state
+    let items: Vec<ListItem> = app
+        .scenario_names
         .iter()
-        .map(|(name, sc)| {
-            let label = if sc.is_default {
-                format!("{name} [default]")
-            } else {
-                name.clone()
+        .map(|name| {
+            let is_active = app
+                .active_override
+                .as_deref()
+                .map(|o| o == name)
+                .unwrap_or(false);
+            let is_default = scenarios
+                .get(name)
+                .map(|sc| sc.is_default)
+                .unwrap_or(false);
+            let label = match (is_active, is_default) {
+                (true, _) => format!("{name} ●"),
+                (false, true) => format!("{name} [default]"),
+                _ => name.clone(),
             };
-            ListItem::new(label)
+            let style = if is_active {
+                Style::default().fg(Color::Green).add_modifier(Modifier::BOLD)
+            } else {
+                Style::default()
+            };
+            ListItem::new(label).style(style)
         })
         .collect();
 
+    let override_hint = app
+        .active_override
+        .as_deref()
+        .map(|o| format!(" Scenarios  [active: {}] ", o))
+        .unwrap_or_else(|| " Scenarios  [auto] ".to_string());
+
     let list = List::new(items)
-        .block(Block::default().borders(Borders::ALL).title(" Scenarios "))
+        .block(Block::default().borders(Borders::ALL).title(override_hint))
         .highlight_style(Style::default().fg(Color::Yellow).add_modifier(Modifier::BOLD))
         .highlight_symbol("▶ ");
     f.render_stateful_widget(list, panes[0], &mut app.scenario_list_state);
 
-    let scenario_names: Vec<String> = scenarios.keys().cloned().collect();
     let detail_lines = if let Some(idx) = app.scenario_list_state.selected() {
-        if let Some(name) = scenario_names.get(idx) {
+        if let Some(name) = app.scenario_names.get(idx) {
             if let Some(sc) = scenarios.get(name) {
                 let mut lines = vec![
                     Line::from(vec![
@@ -422,19 +578,37 @@ fn draw_scenarios(f: &mut ratatui::Frame, app: &mut TuiApp, area: ratatui::layou
                         }),
                     ]),
                     Line::from(""),
-                    Line::from(Span::styled("Models:", Style::default().fg(Color::Cyan))),
+                    Line::from(Span::styled("Models (fallback order):", Style::default().fg(Color::Cyan))),
                 ];
                 for (i, m) in sc.models.iter().enumerate() {
                     let tier = m.cost_tier.as_deref().unwrap_or("?");
                     lines.push(Line::from(format!(
                         "  {}. {}/{} [{}]",
-                        i + 1, m.provider, m.model, tier
+                        i + 1,
+                        m.provider,
+                        m.model,
+                        tier
                     )));
                 }
+                lines.push(Line::from(""));
+                lines.push(Line::from(Span::styled(
+                    "  Enter = pin global routing to this scenario",
+                    Style::default().fg(Color::DarkGray),
+                )));
+                lines.push(Line::from(Span::styled(
+                    "  a     = reset to auto (15-dim analyzer)",
+                    Style::default().fg(Color::DarkGray),
+                )));
                 lines
-            } else { vec![Line::from("Select a scenario")] }
-        } else { vec![Line::from("Select a scenario")] }
-    } else { vec![Line::from("No scenarios configured")] };
+            } else {
+                vec![Line::from("Select a scenario")]
+            }
+        } else {
+            vec![Line::from("Select a scenario")]
+        }
+    } else {
+        vec![Line::from("No scenarios configured")]
+    };
 
     let detail = Paragraph::new(detail_lines)
         .block(Block::default().borders(Borders::ALL).title(" Scenario Details "))
@@ -516,28 +690,42 @@ fn draw_help(f: &mut ratatui::Frame, area: ratatui::layout::Rect) {
         Line::from("  1–5              — Jump to tab directly"),
         Line::from("  j / Down         — Move selection down"),
         Line::from("  k / Up           — Move selection up"),
+        Line::from("  Enter            — [Scenarios] Pin global routing to selected scenario"),
+        Line::from("  a                — [Scenarios] Reset to auto (15-dim analyzer)"),
         Line::from("  q / Ctrl+C       — Quit"),
         Line::from(""),
         Line::from(Span::styled(
-            "  HTTP Endpoints",
+            "  Protocol Endpoints",
             Style::default().fg(Color::Yellow).add_modifier(Modifier::BOLD),
         )),
         Line::from(""),
-        Line::from("  POST /v1/anthropic/chat/completions  → Anthropic Claude"),
-        Line::from("  POST /v1/openai/chat/completions     → OpenAI GPT"),
-        Line::from("  POST /v1/gemini/chat/completions     → Google Gemini"),
-        Line::from("  POST /v1/codex/chat/completions      → OpenAI Codex / Azure"),
-        Line::from("  POST /v1/github/chat/completions     → GitHub Copilot"),
-        Line::from("  POST /v1/auto/chat/completions       → 15-dim auto-route"),
+        Line::from("  POST /v1/anthropic           → Anthropic Messages format (Claude Code)"),
+        Line::from("  POST /v1/anthropic/v1/messages  (same, full path)"),
+        Line::from("  POST /v1/openai              → OpenAI Chat Completions format"),
+        Line::from("  POST /v1/openai/chat/completions  (same, full path)"),
+        Line::from("  POST /v1/codex               → OpenAI format (Codex CLI)"),
+        Line::from("  POST /v1/gemini              → OpenAI-compat format (Gemini)"),
+        Line::from("  POST /v1/auto                → 15-dim auto-route"),
         Line::from(""),
         Line::from(Span::styled(
-            "  Config",
+            "  Control API (while daemon is running)",
             Style::default().fg(Color::Yellow).add_modifier(Modifier::BOLD),
         )),
         Line::from(""),
-        Line::from("  YOLO_CONFIG=/path/to/config.toml yolo-router"),
-        Line::from("  yolo-router --tui           → Open this TUI"),
-        Line::from("  yolo-router --tui --config /path/to/config.toml"),
+        Line::from("  GET  /control/status         → current overrides & providers"),
+        Line::from("  POST /control/override        → {\"endpoint\":\"global\",\"scenario\":\"coding\"}"),
+        Line::from("  DELETE /control/override/{ep} → reset endpoint to auto"),
+        Line::from(""),
+        Line::from(Span::styled(
+            "  CLI",
+            Style::default().fg(Color::Yellow).add_modifier(Modifier::BOLD),
+        )),
+        Line::from(""),
+        Line::from("  yolo-router                  → Start daemon"),
+        Line::from("  yolo-router --tui            → Open this TUI"),
+        Line::from("  yolo-router --auth github    → GitHub Copilot OAuth"),
+        Line::from("  yolo-router --auth codex     → ChatGPT Pro OAuth"),
+        Line::from("  YOLO_CONFIG=./config.toml yolo-router"),
     ];
 
     let para = Paragraph::new(lines)
