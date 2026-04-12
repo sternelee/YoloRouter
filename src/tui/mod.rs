@@ -339,22 +339,246 @@ fn event_loop(
     Ok(())
 }
 
+/// Write model to config + send Reload command. Transitions provider_view to Done/Error.
+fn commit_model_to_scenario(
+    app: &mut TuiApp,
+    provider_name: &str,
+    model: &str,
+    cost_tier: &str,
+    scenario_name: &str,
+    is_new: bool,
+) {
+    let result = if is_new {
+        app.config.add_scenario(scenario_name, provider_name, model, cost_tier)
+    } else {
+        app.config.add_model_to_scenario(scenario_name, provider_name, model, cost_tier)
+    };
+
+    if let Err(e) = result {
+        app.provider_view = ProviderViewState::Error { message: e.to_string() };
+        return;
+    }
+
+    if let Err(e) = app.config.save_to_file(&app.config_path) {
+        app.provider_view = ProviderViewState::Error {
+            message: format!("Failed to write config.toml: {}", e),
+        };
+        return;
+    }
+
+    let _ = app.cmd_tx.try_send(ControlCommand::Reload);
+
+    let action = if is_new { "创建并加入场景" } else { "加入场景" };
+    app.provider_view = ProviderViewState::Done {
+        message: format!("✅ {}/{} {} '{}'，正在通知 daemon…", provider_name, model, action, scenario_name),
+    };
+}
+
 fn handle_tab_key(app: &mut TuiApp, key: KeyCode) {
     match app.tab {
         ActiveTab::Providers => {
-            let providers: Vec<_> = app.config.providers().keys().cloned().collect();
-            match key {
-                KeyCode::Down | KeyCode::Char('j') => {
-                    let i = app.provider_list_state.selected().unwrap_or(0);
-                    let next = if providers.is_empty() { 0 } else { (i + 1) % providers.len() };
-                    app.provider_list_state.select(Some(next));
+            let providers: Vec<String> = app.config.providers().keys().cloned().collect();
+            match app.provider_view.clone() {
+                ProviderViewState::ProviderDetail => match key {
+                    KeyCode::Down | KeyCode::Char('j') => {
+                        let i = app.provider_list_state.selected().unwrap_or(0);
+                        let next = if providers.is_empty() { 0 } else { (i + 1) % providers.len() };
+                        app.provider_list_state.select(Some(next));
+                    }
+                    KeyCode::Up | KeyCode::Char('k') => {
+                        let i = app.provider_list_state.selected().unwrap_or(0);
+                        let prev = if i == 0 { providers.len().saturating_sub(1) } else { i - 1 };
+                        app.provider_list_state.select(Some(prev));
+                    }
+                    KeyCode::Enter => {
+                        if let Some(idx) = app.provider_list_state.selected() {
+                            if let Some(name) = providers.get(idx).cloned() {
+                                if let Some(cfg) = app.config.providers().get(&name).cloned() {
+                                    let _ = app.model_req_tx.try_send(ModelFetchRequest {
+                                        provider_name: name,
+                                        config: cfg,
+                                    });
+                                    app.provider_view = ProviderViewState::FetchingModels;
+                                }
+                            }
+                        }
+                    }
+                    _ => {}
+                },
+
+                ProviderViewState::FetchingModels => {
+                    if key == KeyCode::Esc {
+                        app.provider_view = ProviderViewState::ProviderDetail;
+                    }
                 }
-                KeyCode::Up | KeyCode::Char('k') => {
-                    let i = app.provider_list_state.selected().unwrap_or(0);
-                    let prev = if i == 0 { providers.len().saturating_sub(1) } else { i - 1 };
-                    app.provider_list_state.select(Some(prev));
+
+                ProviderViewState::ModelList { models, selected } => {
+                    match key {
+                        KeyCode::Down | KeyCode::Char('j') => {
+                            let next = if models.is_empty() { 0 } else { (selected + 1) % models.len() };
+                            app.provider_view = ProviderViewState::ModelList { models, selected: next };
+                        }
+                        KeyCode::Up | KeyCode::Char('k') => {
+                            let prev = if selected == 0 { models.len().saturating_sub(1) } else { selected - 1 };
+                            app.provider_view = ProviderViewState::ModelList { models, selected: prev };
+                        }
+                        KeyCode::Enter => {
+                            if let Some(model) = models.get(selected).cloned() {
+                                app.provider_view = ProviderViewState::CostTierPicker {
+                                    model,
+                                    selected: 1, // default: medium
+                                };
+                            }
+                        }
+                        KeyCode::Esc => {
+                            app.provider_view = ProviderViewState::ProviderDetail;
+                        }
+                        _ => {}
+                    }
                 }
-                _ => {}
+
+                ProviderViewState::CostTierPicker { model, selected } => {
+                    match key {
+                        KeyCode::Down | KeyCode::Char('j') => {
+                            app.provider_view = ProviderViewState::CostTierPicker {
+                                model, selected: (selected + 1) % 3,
+                            };
+                        }
+                        KeyCode::Up | KeyCode::Char('k') => {
+                            app.provider_view = ProviderViewState::CostTierPicker {
+                                model, selected: if selected == 0 { 2 } else { selected - 1 },
+                            };
+                        }
+                        KeyCode::Enter => {
+                            let cost_tier = ["low", "medium", "high"][selected].to_string();
+                            app.provider_view = ProviderViewState::ScenarioPicker {
+                                model,
+                                cost_tier,
+                                selected: 0,
+                                creating_new: false,
+                                new_name_input: String::new(),
+                            };
+                        }
+                        KeyCode::Esc => {
+                            app.provider_view = ProviderViewState::ProviderDetail;
+                        }
+                        _ => {}
+                    }
+                }
+
+                ProviderViewState::ScenarioPicker {
+                    model, cost_tier, selected, creating_new, new_name_input,
+                } => {
+                    let mut scenario_names: Vec<String> =
+                        app.config.scenarios().keys().cloned().collect();
+                    scenario_names.sort();
+                    let new_scenario_idx = scenario_names.len();
+                    let total = scenario_names.len() + 1;
+
+                    if creating_new {
+                        match key {
+                            KeyCode::Char(c) => {
+                                let mut input = new_name_input;
+                                input.push(c);
+                                app.provider_view = ProviderViewState::ScenarioPicker {
+                                    model, cost_tier, selected, creating_new: true,
+                                    new_name_input: input,
+                                };
+                            }
+                            KeyCode::Backspace => {
+                                let mut input = new_name_input;
+                                input.pop();
+                                app.provider_view = ProviderViewState::ScenarioPicker {
+                                    model, cost_tier, selected, creating_new: true,
+                                    new_name_input: input,
+                                };
+                            }
+                            KeyCode::Enter => {
+                                if new_name_input.trim().is_empty() {
+                                    app.status_message = "⚠️  Scenario name cannot be empty".to_string();
+                                } else {
+                                    let provider_name = providers
+                                        .get(app.provider_list_state.selected().unwrap_or(0))
+                                        .cloned()
+                                        .unwrap_or_default();
+                                    let name = new_name_input.trim().to_string();
+                                    commit_model_to_scenario(
+                                        app,
+                                        &provider_name,
+                                        &model,
+                                        &cost_tier,
+                                        &name,
+                                        true,
+                                    );
+                                }
+                            }
+                            KeyCode::Esc => {
+                                app.provider_view = ProviderViewState::ScenarioPicker {
+                                    model, cost_tier, selected,
+                                    creating_new: false,
+                                    new_name_input: String::new(),
+                                };
+                            }
+                            _ => {}
+                        }
+                    } else {
+                        match key {
+                            KeyCode::Down | KeyCode::Char('j') => {
+                                app.provider_view = ProviderViewState::ScenarioPicker {
+                                    model, cost_tier,
+                                    selected: (selected + 1) % total,
+                                    creating_new: false, new_name_input,
+                                };
+                            }
+                            KeyCode::Up | KeyCode::Char('k') => {
+                                app.provider_view = ProviderViewState::ScenarioPicker {
+                                    model, cost_tier,
+                                    selected: if selected == 0 { total - 1 } else { selected - 1 },
+                                    creating_new: false, new_name_input,
+                                };
+                            }
+                            KeyCode::Enter => {
+                                let provider_name = providers
+                                    .get(app.provider_list_state.selected().unwrap_or(0))
+                                    .cloned()
+                                    .unwrap_or_default();
+                                if selected == new_scenario_idx {
+                                    app.provider_view = ProviderViewState::ScenarioPicker {
+                                        model, cost_tier, selected,
+                                        creating_new: true,
+                                        new_name_input: String::new(),
+                                    };
+                                } else if let Some(scenario_name) = scenario_names.get(selected) {
+                                    let scenario_name = scenario_name.clone();
+                                    commit_model_to_scenario(
+                                        app,
+                                        &provider_name,
+                                        &model,
+                                        &cost_tier,
+                                        &scenario_name,
+                                        false,
+                                    );
+                                }
+                            }
+                            KeyCode::Esc => {
+                                app.provider_view = ProviderViewState::CostTierPicker {
+                                    model,
+                                    selected: 1,
+                                };
+                            }
+                            _ => {}
+                        }
+                    }
+                }
+
+                ProviderViewState::Done { .. } | ProviderViewState::Error { .. } => {
+                    // any key returns to ProviderDetail
+                    app.provider_view = ProviderViewState::ProviderDetail;
+                    // refresh scenario list after a successful add
+                    let mut names: Vec<String> = app.config.scenarios().keys().cloned().collect();
+                    names.sort();
+                    app.scenario_names = names;
+                }
             }
         }
         ActiveTab::Scenarios => {
