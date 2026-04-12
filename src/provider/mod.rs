@@ -6,6 +6,7 @@ pub mod github_copilot;
 pub mod codex;
 pub mod codex_oauth;
 pub mod factory;
+pub mod models;
 
 pub use anthropic::AnthropicProvider;
 pub use openai::OpenAIProvider;
