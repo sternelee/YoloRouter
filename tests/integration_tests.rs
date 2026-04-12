@@ -56,6 +56,7 @@ retry_count = 2
             max_tokens: Some(1000),
             temperature: Some(0.7),
             top_p: None,
+            system: None,
         };
 
         assert_eq!(request.model, "claude-opus");

@@ -73,16 +73,24 @@ pub async fn run_codex_device_flow(
         drive_codex_flow(state_clone, path_clone).await;
     });
 
-    let mut terminal = setup_terminal()?;
-    let app = CodexAuthApp {
-        state: Arc::clone(&state),
-        spinner_tick: 0,
-    };
+    // Run the blocking TUI event loop on a dedicated thread so the tokio
+    // runtime (which may be single-threaded under #[actix_web::main]) stays
+    // free to drive the async `drive_codex_flow` task above.
+    let state_for_tui = Arc::clone(&state);
+    let tui_result = tokio::task::spawn_blocking(move || {
+        let mut terminal = setup_terminal()?;
+        let app = CodexAuthApp {
+            state: state_for_tui,
+            spinner_tick: 0,
+        };
+        let result = event_loop(&mut terminal, app);
+        restore_terminal(&mut terminal);
+        result
+    })
+    .await
+    .map_err(|e| io::Error::new(io::ErrorKind::Other, e.to_string()))??;
 
-    let result = event_loop(&mut terminal, app);
-    restore_terminal(&mut terminal);
-
-    result
+    Ok(tui_result)
 }
 
 // ─── Async driver ─────────────────────────────────────────────────────────────

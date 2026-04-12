@@ -16,6 +16,12 @@ const GITHUB_TOKEN_URL: &str = "https://github.com/login/oauth/access_token";
 const GITHUB_COPILOT_TOKEN_URL: &str = "https://api.github.com/copilot_internal/v2/token";
 const COPILOT_CHAT_URL: &str = "https://api.githubcopilot.com/chat/completions";
 
+// Header constants kept in sync with VS Code Copilot extension
+const COPILOT_EDITOR_VERSION: &str = "vscode/1.110.1";
+const COPILOT_PLUGIN_VERSION: &str = "copilot-chat/0.38.2";
+const COPILOT_USER_AGENT: &str = "GitHubCopilotChat/0.38.2";
+const COPILOT_API_VERSION: &str = "2025-10-01";
+
 #[derive(Debug, Deserialize)]
 pub struct DeviceCodeResponse {
     pub device_code: String,
@@ -70,10 +76,11 @@ impl GitHubCopilotProvider {
             .client
             .post(GITHUB_DEVICE_CODE_URL)
             .header("Accept", "application/json")
-            .json(&json!({
-                "client_id": self.client_id,
-                "scope": "read:user"
-            }))
+            .header("User-Agent", COPILOT_USER_AGENT)
+            .form(&[
+                ("client_id", self.client_id.as_str()),
+                ("scope", "read:user"),
+            ])
             .send()
             .await
             .map_err(crate::error::YoloRouterError::HttpError)?;
@@ -105,11 +112,12 @@ impl GitHubCopilotProvider {
                 .client
                 .post(GITHUB_TOKEN_URL)
                 .header("Accept", "application/json")
-                .json(&json!({
-                    "client_id": self.client_id,
-                    "device_code": device_code,
-                    "grant_type": "urn:ietf:params:oauth:grant-type:device_code"
-                }))
+                .header("User-Agent", COPILOT_USER_AGENT)
+                .form(&[
+                    ("client_id", self.client_id.as_str()),
+                    ("device_code", device_code),
+                    ("grant_type", "urn:ietf:params:oauth:grant-type:device_code"),
+                ])
                 .send()
                 .await
                 .map_err(crate::error::YoloRouterError::HttpError)?;
@@ -162,10 +170,9 @@ impl GitHubCopilotProvider {
             .get(GITHUB_COPILOT_TOKEN_URL)
             .header("Authorization", format!("token {}", self.github_token))
             .header("Accept", "application/json")
-            .header(
-                "User-Agent",
-                "github-copilot-proxy/1.0 (yolo-router)",
-            )
+            .header("User-Agent", COPILOT_USER_AGENT)
+            .header("Editor-Version", COPILOT_EDITOR_VERSION)
+            .header("Editor-Plugin-Version", COPILOT_PLUGIN_VERSION)
             .send()
             .await
             .map_err(|e| crate::error::YoloRouterError::HttpError(e))?;
@@ -216,9 +223,10 @@ impl Provider for GitHubCopilotProvider {
             .header("Authorization", format!("Bearer {}", copilot_token))
             .header("Content-Type", "application/json")
             .header("Copilot-Integration-Id", "vscode-chat")
-            .header("Editor-Version", "vscode/1.85.0")
-            .header("Editor-Plugin-Version", "copilot-chat/0.12.0")
-            .header("User-Agent", "GitHubCopilotChat/0.12.0")
+            .header("Editor-Version", COPILOT_EDITOR_VERSION)
+            .header("Editor-Plugin-Version", COPILOT_PLUGIN_VERSION)
+            .header("User-Agent", COPILOT_USER_AGENT)
+            .header("x-github-api-version", COPILOT_API_VERSION)
             .json(&payload)
             .send()
             .await
