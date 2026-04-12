@@ -223,7 +223,16 @@ impl TuiManager {
                             Ok(resp) if resp.status().is_success() => {
                                 "✅ 已实时生效".to_string()
                             }
-                            Ok(_) | Err(_) => {
+                            Ok(resp) => {
+                                let status = resp.status();
+                                let body = resp.text().await.unwrap_or_default();
+                                if status.is_client_error() || status.is_server_error() {
+                                    format!("❌ 热重载失败: HTTP {} {}", status, body)
+                                } else {
+                                    format!("⚠️  热重载状态异常: HTTP {}", status)
+                                }
+                            }
+                            Err(_) => {
                                 "⚠️  已写入 config.toml，daemon 离线，重启后生效".to_string()
                             }
                         }
@@ -393,12 +402,16 @@ fn handle_tab_key(app: &mut TuiApp, key: KeyCode) {
                     KeyCode::Enter => {
                         if let Some(idx) = app.provider_list_state.selected() {
                             if let Some(name) = providers.get(idx).cloned() {
-                                if let Some(cfg) = app.config.providers().get(&name).cloned() {
+                                if let Ok(cfg) = app.config.get_provider(&name) {
                                     let _ = app.model_req_tx.try_send(ModelFetchRequest {
                                         provider_name: name,
                                         config: cfg,
                                     });
                                     app.provider_view = ProviderViewState::FetchingModels;
+                                } else {
+                                    app.provider_view = ProviderViewState::Error {
+                                        message: format!("Failed to load provider '{}' config", name),
+                                    };
                                 }
                             }
                         }

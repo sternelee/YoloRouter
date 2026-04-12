@@ -26,14 +26,14 @@ fn expand_env_var(value: &str) -> String {
 
 impl Config {
     pub fn from_file(path: impl AsRef<Path>) -> Result<Self> {
-        let content = fs::read_to_string(path)
-            .map_err(|e| YoloRouterError::ConfigError(format!("Failed to read config file: {}", e)))?;
+        let content = fs::read_to_string(path).map_err(|e| {
+            YoloRouterError::ConfigError(format!("Failed to read config file: {}", e))
+        })?;
         Self::from_string(&content)
     }
 
     pub fn from_string(content: &str) -> Result<Self> {
-        toml::from_str(content)
-            .map_err(|e| YoloRouterError::TomlError(e))
+        toml::from_str(content).map_err(|e| YoloRouterError::TomlError(e))
     }
 
     pub fn to_string(&self) -> Result<String> {
@@ -43,17 +43,14 @@ impl Config {
 
     pub fn save_to_file(&self, path: impl AsRef<Path>) -> Result<()> {
         let content = self.to_string()?;
-        fs::write(path, content)
-            .map_err(|e| YoloRouterError::IoError(e))
+        fs::write(path, content).map_err(|e| YoloRouterError::IoError(e))
     }
 
     pub fn daemon(&self) -> DaemonConfig {
-        self.daemon
-            .clone()
-            .unwrap_or(DaemonConfig {
-                port: 8080,
-                log_level: "info".to_string(),
-            })
+        self.daemon.clone().unwrap_or(DaemonConfig {
+            port: 8080,
+            log_level: "info".to_string(),
+        })
     }
 
     pub fn providers(&self) -> HashMap<String, ProviderConfig> {
@@ -65,21 +62,18 @@ impl Config {
     }
 
     pub fn routing(&self) -> RoutingConfig {
-        self.routing
-            .clone()
-            .unwrap_or(RoutingConfig {
-                fallback_enabled: true,
-                timeout_ms: 30000,
-                retry_count: 2,
-                confidence_threshold: 0.6,
-            })
+        self.routing.clone().unwrap_or(RoutingConfig {
+            fallback_enabled: true,
+            timeout_ms: 30000,
+            retry_count: 2,
+            confidence_threshold: 0.6,
+        })
     }
 
     pub fn get_provider(&self, name: &str) -> Result<ProviderConfig> {
-        let mut provider = self.providers()
-            .get(name)
-            .cloned()
-            .ok_or_else(|| YoloRouterError::ConfigError(format!("Provider '{}' not found", name)))?;
+        let mut provider = self.providers().get(name).cloned().ok_or_else(|| {
+            YoloRouterError::ConfigError(format!("Provider '{}' not found", name))
+        })?;
 
         // Expand environment variables in api_key and token
         if let Some(ref api_key) = provider.api_key {
@@ -87,6 +81,9 @@ impl Config {
         }
         if let Some(ref token) = provider.token {
             provider.token = Some(expand_env_var(token));
+        }
+        if let Some(ref base_url) = provider.base_url {
+            provider.base_url = Some(expand_env_var(base_url));
         }
 
         Ok(provider)
@@ -107,7 +104,8 @@ impl Config {
         model: &str,
         cost_tier: &str,
     ) -> Result<()> {
-        let scenarios = self.scenarios
+        let scenarios = self
+            .scenarios
             .get_or_insert_with(std::collections::HashMap::new);
         let scenario = scenarios.get_mut(scenario_name).ok_or_else(|| {
             YoloRouterError::ConfigError(format!("Scenario '{}' not found", scenario_name))
@@ -130,27 +128,32 @@ impl Config {
         model: &str,
         cost_tier: &str,
     ) -> Result<()> {
-        let scenarios = self.scenarios
+        let scenarios = self
+            .scenarios
             .get_or_insert_with(std::collections::HashMap::new);
         if scenarios.contains_key(scenario_name) {
             return Err(YoloRouterError::ConfigError(format!(
-                "Scenario '{}' already exists", scenario_name
+                "Scenario '{}' already exists",
+                scenario_name
             )));
         }
-        scenarios.insert(scenario_name.to_string(), ScenarioConfig {
-            models: vec![ModelConfig {
-                provider: provider.to_string(),
-                model: model.to_string(),
-                cost_tier: Some(cost_tier.to_string()),
-                capabilities: None,
-                fallback_to: None,
-            }],
-            default_tier: None,
-            match_task_types: vec![],
-            match_languages: vec![],
-            priority: 0,
-            is_default: false,
-        });
+        scenarios.insert(
+            scenario_name.to_string(),
+            ScenarioConfig {
+                models: vec![ModelConfig {
+                    provider: provider.to_string(),
+                    model: model.to_string(),
+                    cost_tier: Some(cost_tier.to_string()),
+                    capabilities: None,
+                    fallback_to: None,
+                }],
+                default_tier: None,
+                match_task_types: vec![],
+                match_languages: vec![],
+                priority: 0,
+                is_default: false,
+            },
+        );
         Ok(())
     }
 
@@ -159,9 +162,10 @@ impl Config {
         for (scenario_name, scenario) in self.scenarios() {
             for model in &scenario.models {
                 if !self.providers().contains_key(&model.provider) {
-                    return Err(YoloRouterError::ConfigError(
-                        format!("Scenario '{}' references non-existent provider '{}'", scenario_name, model.provider)
-                    ));
+                    return Err(YoloRouterError::ConfigError(format!(
+                        "Scenario '{}' references non-existent provider '{}'",
+                        scenario_name, model.provider
+                    )));
                 }
             }
         }
@@ -202,10 +206,18 @@ port = 8080
 [providers.test]
 type = "test"
 api_key = "${TEST_API_KEY}"
+base_url = "${TEST_BASE_URL}"
 "#;
+        unsafe {
+            std::env::set_var("TEST_BASE_URL", "https://example.com/v1");
+        }
         let config = Config::from_string(toml_str).unwrap();
         let provider = config.get_provider("test").unwrap();
         assert_eq!(provider.api_key, Some("secret-123".to_string()));
+        assert_eq!(
+            provider.base_url,
+            Some("https://example.com/v1".to_string())
+        );
     }
 
     #[test]
@@ -230,7 +242,8 @@ mod mutation_tests {
     use super::*;
 
     fn base_config() -> Config {
-        Config::from_string(r#"
+        Config::from_string(
+            r#"
 [daemon]
 port = 8080
 
@@ -245,13 +258,16 @@ models = [
 
 [routing]
 fallback_enabled = true
-"#).unwrap()
+"#,
+        )
+        .unwrap()
     }
 
     #[test]
     fn test_add_model_to_existing_scenario() {
         let mut cfg = base_config();
-        cfg.add_model_to_scenario("coding", "openai", "gpt-4o", "medium").unwrap();
+        cfg.add_model_to_scenario("coding", "openai", "gpt-4o", "medium")
+            .unwrap();
         let scenarios = cfg.scenarios();
         let models = &scenarios["coding"].models;
         assert_eq!(models.len(), 2);
@@ -270,12 +286,16 @@ fallback_enabled = true
     #[test]
     fn test_add_scenario_creates_new() {
         let mut cfg = base_config();
-        cfg.add_scenario("budget", "openai", "gpt-3.5-turbo", "low").unwrap();
+        cfg.add_scenario("budget", "openai", "gpt-3.5-turbo", "low")
+            .unwrap();
         let scenarios = cfg.scenarios();
         assert!(scenarios.contains_key("budget"));
         assert_eq!(scenarios["budget"].models.len(), 1);
         assert_eq!(scenarios["budget"].models[0].model, "gpt-3.5-turbo");
-        assert_eq!(scenarios["budget"].models[0].cost_tier.as_deref(), Some("low"));
+        assert_eq!(
+            scenarios["budget"].models[0].cost_tier.as_deref(),
+            Some("low")
+        );
     }
 
     #[test]
@@ -288,7 +308,8 @@ fallback_enabled = true
     #[test]
     fn test_config_round_trips_after_mutation() {
         let mut cfg = base_config();
-        cfg.add_model_to_scenario("coding", "openai", "gpt-4o", "medium").unwrap();
+        cfg.add_model_to_scenario("coding", "openai", "gpt-4o", "medium")
+            .unwrap();
         let toml_str = cfg.to_string().unwrap();
         let reloaded = Config::from_string(&toml_str).unwrap();
         assert_eq!(reloaded.scenarios()["coding"].models.len(), 2);

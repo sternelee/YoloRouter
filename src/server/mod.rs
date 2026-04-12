@@ -213,6 +213,28 @@ async fn control_clear_override(
 async fn control_reload(state: web::Data<AppState>) -> actix_web::Result<HttpResponse> {
     match crate::Config::from_file(&state.config_path) {
         Ok(new_config) => {
+            if let Err(e) = new_config.validate() {
+                tracing::error!("Config reload validation failed: {}", e);
+                return Ok(HttpResponse::BadRequest().json(serde_json::json!({
+                    "error": e.to_string(),
+                })));
+            }
+
+            if let Err(e) = state.router.reload(&new_config).await {
+                tracing::error!("Config reload failed while rebuilding router: {}", e);
+                return Ok(HttpResponse::InternalServerError().json(serde_json::json!({
+                    "error": e.to_string(),
+                })));
+            }
+
+            {
+                let mut overrides = state.overrides.write().await;
+                overrides.retain(|_, ov| match ov {
+                    ScenarioOverride::Auto => true,
+                    ScenarioOverride::Pinned(name) => new_config.get_scenario(name).is_ok(),
+                });
+            }
+
             *state.config.write().await = new_config;
             tracing::info!("Config hot-reloaded from {}", state.config_path);
             Ok(HttpResponse::Ok().json(serde_json::json!({
