@@ -60,12 +60,12 @@ impl ActiveTab {
     }
 }
 
-// ─── Override command sent from TUI to background HTTP task ──────────────────
+// ─── Commands sent from TUI to background HTTP task ──────────────────────────
 
 #[derive(Debug)]
-pub struct OverrideCommand {
-    pub endpoint: String,
-    pub scenario: Option<String>, // None = reset to auto
+pub enum ControlCommand {
+    Override { endpoint: String, scenario: Option<String> },
+    Reload,
 }
 
 // ─── TuiApp State ────────────────────────────────────────────────────────────
@@ -82,7 +82,7 @@ struct TuiApp {
     /// Active override label for display (updated via HTTP result channel)
     active_override: Option<String>,
     /// Send override commands to the async HTTP task
-    cmd_tx: tokio::sync::mpsc::Sender<OverrideCommand>,
+    cmd_tx: tokio::sync::mpsc::Sender<ControlCommand>,
     /// Receive results/status messages from the async HTTP task
     status_rx: mpsc::Receiver<String>,
 }
@@ -91,7 +91,7 @@ impl TuiApp {
     fn new(
         config: Config,
         config_path: String,
-        cmd_tx: tokio::sync::mpsc::Sender<OverrideCommand>,
+        cmd_tx: tokio::sync::mpsc::Sender<ControlCommand>,
         status_rx: mpsc::Receiver<String>,
     ) -> Self {
         let mut provider_list_state = ListState::default();
@@ -134,35 +134,55 @@ impl TuiManager {
 
     pub async fn run(&self, config: Config, config_path: String) {
         let port = config.daemon().port;
-        let (cmd_tx, mut cmd_rx) = tokio::sync::mpsc::channel::<OverrideCommand>(16);
+        let (cmd_tx, mut cmd_rx) = tokio::sync::mpsc::channel::<ControlCommand>(16);
         let (status_tx, status_rx) = mpsc::channel::<String>();
 
-        // Background async task: receives override commands, sends HTTP to daemon
+        // Background async task: receives control commands, sends HTTP to daemon
         tokio::spawn(async move {
             let client = reqwest::Client::new();
             while let Some(cmd) = cmd_rx.recv().await {
-                let url = format!("http://127.0.0.1:{}/control/override", port);
-                let body = serde_json::json!({
-                    "endpoint": cmd.endpoint,
-                    "scenario": cmd.scenario,
-                });
-                let result = match client
-                    .post(&url)
-                    .json(&body)
-                    .timeout(Duration::from_secs(2))
-                    .send()
-                    .await
-                {
-                    Ok(resp) if resp.status().is_success() => {
-                        let label = cmd.scenario.as_deref().unwrap_or("auto");
-                        format!("✅ {} → {}", cmd.endpoint, label)
+                let result = match cmd {
+                    ControlCommand::Override { endpoint, scenario } => {
+                        let url = format!("http://127.0.0.1:{}/control/override", port);
+                        let body = serde_json::json!({
+                            "endpoint": endpoint,
+                            "scenario": scenario,
+                        });
+                        match client
+                            .post(&url)
+                            .json(&body)
+                            .timeout(Duration::from_secs(2))
+                            .send()
+                            .await
+                        {
+                            Ok(resp) if resp.status().is_success() => {
+                                let label = scenario.as_deref().unwrap_or("auto");
+                                format!("✅ {} → {}", endpoint, label)
+                            }
+                            Ok(resp) => format!("❌ Override failed: HTTP {}", resp.status()),
+                            Err(e) => {
+                                if e.is_timeout() || e.is_connect() {
+                                    "⚠️  Daemon offline — start daemon first (yolo-router)".to_string()
+                                } else {
+                                    format!("❌ {}", e)
+                                }
+                            }
+                        }
                     }
-                    Ok(resp) => format!("❌ Override failed: HTTP {}", resp.status()),
-                    Err(e) => {
-                        if e.is_timeout() || e.is_connect() {
-                            "⚠️  Daemon offline — start daemon first (yolo-router)".to_string()
-                        } else {
-                            format!("❌ {}", e)
+                    ControlCommand::Reload => {
+                        let url = format!("http://127.0.0.1:{}/control/reload", port);
+                        match client
+                            .post(&url)
+                            .timeout(Duration::from_secs(3))
+                            .send()
+                            .await
+                        {
+                            Ok(resp) if resp.status().is_success() => {
+                                "✅ 已实时生效".to_string()
+                            }
+                            Ok(_) | Err(_) => {
+                                "⚠️  已写入 config.toml，daemon 离线，重启后生效".to_string()
+                            }
                         }
                     }
                 };
@@ -202,7 +222,7 @@ fn restore_terminal(terminal: &mut Terminal<CrosstermBackend<io::Stdout>>) {
 fn run_tui(
     config: Config,
     config_path: String,
-    cmd_tx: tokio::sync::mpsc::Sender<OverrideCommand>,
+    cmd_tx: tokio::sync::mpsc::Sender<ControlCommand>,
     status_rx: mpsc::Receiver<String>,
 ) -> io::Result<()> {
     let mut terminal = setup_terminal()?;
@@ -284,7 +304,7 @@ fn handle_tab_key(app: &mut TuiApp, key: KeyCode) {
                 KeyCode::Enter => {
                     if let Some(i) = app.scenario_list_state.selected() {
                         if let Some(name) = app.scenario_names.get(i).cloned() {
-                            let cmd = OverrideCommand {
+                            let cmd = ControlCommand::Override {
                                 endpoint: "global".to_string(),
                                 scenario: Some(name.clone()),
                             };
@@ -301,7 +321,7 @@ fn handle_tab_key(app: &mut TuiApp, key: KeyCode) {
                     }
                 }
                 KeyCode::Char('a') => {
-                    let cmd = OverrideCommand {
+                    let cmd = ControlCommand::Override {
                         endpoint: "global".to_string(),
                         scenario: None,
                     };
