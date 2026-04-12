@@ -759,6 +759,7 @@ fn draw_providers(f: &mut ratatui::Frame, app: &mut TuiApp, area: ratatui::layou
         .constraints([Constraint::Percentage(35), Constraint::Percentage(65)])
         .split(area);
 
+    // ── Left pane: provider list ───────────────────────────────────────────────
     let providers = app.config.providers();
     let items: Vec<ListItem> = providers
         .keys()
@@ -771,44 +772,229 @@ fn draw_providers(f: &mut ratatui::Frame, app: &mut TuiApp, area: ratatui::layou
         .highlight_symbol("▶ ");
     f.render_stateful_widget(list, panes[0], &mut app.provider_list_state);
 
-    // Detail pane
-    let provider_names: Vec<String> = providers.keys().cloned().collect();
-    let detail_text = if let Some(idx) = app.provider_list_state.selected() {
-        if let Some(name) = provider_names.get(idx) {
-            if let Some(cfg) = providers.get(name) {
-                vec![
-                    Line::from(vec![
-                        Span::styled("Name:      ", Style::default().fg(Color::Cyan)),
-                        Span::raw(name),
-                    ]),
-                    Line::from(vec![
-                        Span::styled("Type:      ", Style::default().fg(Color::Cyan)),
-                        Span::raw(&cfg.provider_type),
-                    ]),
-                    Line::from(vec![
-                        Span::styled("API Key:   ", Style::default().fg(Color::Cyan)),
-                        Span::raw(cfg.api_key.as_deref().map(|k| {
-                            if k.len() > 8 { format!("{}...{}", &k[..4], &k[k.len()-4..]) }
-                            else { "****".to_string() }
-                        }).unwrap_or_else(|| "not set".to_string())),
-                    ]),
-                    Line::from(vec![
-                        Span::styled("Auth Type: ", Style::default().fg(Color::Cyan)),
-                        Span::raw(cfg.auth_type.as_deref().unwrap_or("api_key")),
-                    ]),
-                    Line::from(vec![
-                        Span::styled("Base URL:  ", Style::default().fg(Color::Cyan)),
-                        Span::raw(cfg.base_url.as_deref().unwrap_or("(default)")),
-                    ]),
-                ]
-            } else { vec![Line::from("Select a provider")] }
-        } else { vec![Line::from("Select a provider")] }
-    } else { vec![Line::from("No providers configured")] };
+    // ── Right pane: driven by ProviderViewState ────────────────────────────────
+    match app.provider_view.clone() {
+        ProviderViewState::ProviderDetail => {
+            let provider_names: Vec<String> = providers.keys().cloned().collect();
+            let detail_text = if let Some(idx) = app.provider_list_state.selected() {
+                if let Some(name) = provider_names.get(idx) {
+                    if let Some(cfg) = providers.get(name) {
+                        vec![
+                            Line::from(vec![
+                                Span::styled("Name:      ", Style::default().fg(Color::Cyan)),
+                                Span::raw(name.as_str()),
+                            ]),
+                            Line::from(vec![
+                                Span::styled("Type:      ", Style::default().fg(Color::Cyan)),
+                                Span::raw(cfg.provider_type.as_str()),
+                            ]),
+                            Line::from(vec![
+                                Span::styled("API Key:   ", Style::default().fg(Color::Cyan)),
+                                Span::raw(cfg.api_key.as_deref().map(|k| {
+                                    if k.len() > 8 { format!("{}...{}", &k[..4], &k[k.len()-4..]) }
+                                    else { "****".to_string() }
+                                }).unwrap_or_else(|| "not set".to_string())),
+                            ]),
+                            Line::from(vec![
+                                Span::styled("Auth Type: ", Style::default().fg(Color::Cyan)),
+                                Span::raw(cfg.auth_type.as_deref().unwrap_or("api_key")),
+                            ]),
+                            Line::from(vec![
+                                Span::styled("Base URL:  ", Style::default().fg(Color::Cyan)),
+                                Span::raw(cfg.base_url.as_deref().unwrap_or("(default)")),
+                            ]),
+                            Line::from(""),
+                            Line::from(Span::styled(
+                                "  Enter — fetch model list",
+                                Style::default().fg(Color::DarkGray),
+                            )),
+                        ]
+                    } else { vec![Line::from("Select a provider")] }
+                } else { vec![Line::from("Select a provider")] }
+            } else { vec![Line::from("No providers configured")] };
 
-    let detail = Paragraph::new(detail_text)
-        .block(Block::default().borders(Borders::ALL).title(" Provider Details "))
-        .alignment(Alignment::Left);
-    f.render_widget(detail, panes[1]);
+            let detail = Paragraph::new(detail_text)
+                .block(Block::default().borders(Borders::ALL).title(" Provider Details "))
+                .alignment(Alignment::Left);
+            f.render_widget(detail, panes[1]);
+        }
+
+        ProviderViewState::FetchingModels => {
+            let para = Paragraph::new(vec![
+                Line::from(""),
+                Line::from(Span::styled(
+                    "  ⠋ Fetching model list…",
+                    Style::default().fg(Color::Yellow),
+                )),
+                Line::from(""),
+                Line::from(Span::styled(
+                    "  Esc — cancel",
+                    Style::default().fg(Color::DarkGray),
+                )),
+            ])
+            .block(Block::default().borders(Borders::ALL).title(" Models "));
+            f.render_widget(para, panes[1]);
+        }
+
+        ProviderViewState::ModelList { models, selected } => {
+            let items: Vec<ListItem> = models
+                .iter()
+                .map(|m| ListItem::new(m.as_str()))
+                .collect();
+            let mut state = ListState::default();
+            state.select(Some(selected));
+            let list = List::new(items)
+                .block(Block::default().borders(Borders::ALL)
+                    .title(format!(" Models ({}) — Enter=select  Esc=back ", models.len())))
+                .highlight_style(Style::default().fg(Color::Yellow).add_modifier(Modifier::BOLD))
+                .highlight_symbol("▶ ");
+            f.render_stateful_widget(list, panes[1], &mut state);
+        }
+
+        ProviderViewState::CostTierPicker { model, selected } => {
+            let tiers = [
+                ("low",    "适合快速、便宜的任务"),
+                ("medium", "平衡性价比"),
+                ("high",   "最强能力，成本最高"),
+            ];
+            let mut lines = vec![
+                Line::from(""),
+                Line::from(vec![
+                    Span::styled("Model: ", Style::default().fg(Color::Cyan)),
+                    Span::styled(model.as_str(), Style::default().fg(Color::Yellow).add_modifier(Modifier::BOLD)),
+                ]),
+                Line::from(""),
+                Line::from(Span::styled("选择 cost tier：", Style::default().fg(Color::Cyan))),
+                Line::from(""),
+            ];
+            for (i, (tier, desc)) in tiers.iter().enumerate() {
+                let is_sel = i == selected;
+                let prefix = if is_sel { "▶ " } else { "  " };
+                let style = if is_sel {
+                    Style::default().fg(Color::Yellow).add_modifier(Modifier::BOLD)
+                } else {
+                    Style::default()
+                };
+                lines.push(Line::from(Span::styled(
+                    format!("{}[{}]  {}", prefix, tier, desc),
+                    style,
+                )));
+            }
+            lines.push(Line::from(""));
+            lines.push(Line::from(Span::styled(
+                "  Enter=confirm  Esc=back",
+                Style::default().fg(Color::DarkGray),
+            )));
+            let para = Paragraph::new(lines)
+                .block(Block::default().borders(Borders::ALL).title(" Cost Tier "));
+            f.render_widget(para, panes[1]);
+        }
+
+        ProviderViewState::ScenarioPicker {
+            model, cost_tier, selected, creating_new, new_name_input,
+        } => {
+            let mut scenario_names: Vec<String> =
+                app.config.scenarios().keys().cloned().collect();
+            scenario_names.sort();
+            let new_scenario_idx = scenario_names.len();
+
+            let mut lines = vec![
+                Line::from(""),
+                Line::from(vec![
+                    Span::styled("Model: ", Style::default().fg(Color::Cyan)),
+                    Span::styled(
+                        format!("{} [{}]", model, cost_tier),
+                        Style::default().fg(Color::Yellow).add_modifier(Modifier::BOLD),
+                    ),
+                ]),
+                Line::from(""),
+                Line::from(Span::styled("选择或新建场景：", Style::default().fg(Color::Cyan))),
+                Line::from(""),
+            ];
+
+            for (i, name) in scenario_names.iter().enumerate() {
+                let is_sel = i == selected && !creating_new;
+                let prefix = if is_sel { "▶ " } else { "  " };
+                let style = if is_sel {
+                    Style::default().fg(Color::Yellow).add_modifier(Modifier::BOLD)
+                } else {
+                    Style::default()
+                };
+                lines.push(Line::from(Span::styled(format!("{}{}", prefix, name), style)));
+            }
+
+            // "[+ New Scenario]" item
+            if creating_new {
+                lines.push(Line::from(Span::styled(
+                    format!("▶ [+ New Scenario]: {}_", new_name_input),
+                    Style::default().fg(Color::Green).add_modifier(Modifier::BOLD),
+                )));
+            } else {
+                let is_sel = selected == new_scenario_idx;
+                let prefix = if is_sel { "▶ " } else { "  " };
+                let style = if is_sel {
+                    Style::default().fg(Color::Green).add_modifier(Modifier::BOLD)
+                } else {
+                    Style::default().fg(Color::Green)
+                };
+                lines.push(Line::from(Span::styled(
+                    format!("{}[+ New Scenario]", prefix),
+                    style,
+                )));
+            }
+
+            lines.push(Line::from(""));
+            if creating_new {
+                lines.push(Line::from(Span::styled(
+                    "  输入场景名称，Enter=确认  Esc=取消",
+                    Style::default().fg(Color::DarkGray),
+                )));
+            } else {
+                lines.push(Line::from(Span::styled(
+                    "  Enter=选择  Esc=back",
+                    Style::default().fg(Color::DarkGray),
+                )));
+            }
+
+            let para = Paragraph::new(lines)
+                .block(Block::default().borders(Borders::ALL).title(" Select Scenario "));
+            f.render_widget(para, panes[1]);
+        }
+
+        ProviderViewState::Done { message } => {
+            let para = Paragraph::new(vec![
+                Line::from(""),
+                Line::from(Span::styled(
+                    message.as_str(),
+                    Style::default().fg(Color::Green).add_modifier(Modifier::BOLD),
+                )),
+                Line::from(""),
+                Line::from(Span::styled(
+                    "  任意键返回",
+                    Style::default().fg(Color::DarkGray),
+                )),
+            ])
+            .block(Block::default().borders(Borders::ALL).title(" Done "));
+            f.render_widget(para, panes[1]);
+        }
+
+        ProviderViewState::Error { message } => {
+            let para = Paragraph::new(vec![
+                Line::from(""),
+                Line::from(Span::styled(
+                    format!("  ✗ {}", message),
+                    Style::default().fg(Color::Red).add_modifier(Modifier::BOLD),
+                )),
+                Line::from(""),
+                Line::from(Span::styled(
+                    "  任意键返回",
+                    Style::default().fg(Color::DarkGray),
+                )),
+            ])
+            .block(Block::default().borders(Borders::ALL).title(" Error "));
+            f.render_widget(para, panes[1]);
+        }
+    }
 }
 
 fn draw_scenarios(f: &mut ratatui::Frame, app: &mut TuiApp, area: ratatui::layout::Rect) {
