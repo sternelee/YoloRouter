@@ -1,5 +1,15 @@
 use crate::config::schema::ProviderConfig;
-use std::collections::HashMap;
+
+static HTTP_CLIENT: std::sync::OnceLock<reqwest::Client> = std::sync::OnceLock::new();
+
+fn get_http_client() -> &'static reqwest::Client {
+    HTTP_CLIENT.get_or_init(|| {
+        reqwest::Client::builder()
+            .timeout(std::time::Duration::from_secs(10))
+            .build()
+            .expect("Failed to build HTTP client")
+    })
+}
 
 pub async fn fetch_provider_models(cfg: &ProviderConfig) -> Result<Vec<String>, String> {
     match cfg.provider_type.as_str() {
@@ -53,10 +63,7 @@ pub async fn fetch_provider_models(cfg: &ProviderConfig) -> Result<Vec<String>, 
 
 async fn fetch_openai_compatible_models(base_url: &str, api_key: &str) -> Result<Vec<String>, String> {
     let url = format!("{}/models", base_url.trim_end_matches('/'));
-    let client = reqwest::Client::builder()
-        .timeout(std::time::Duration::from_secs(10))
-        .build()
-        .map_err(|e| e.to_string())?;
+    let client = get_http_client();
     let resp = client
         .get(&url)
         .header("Authorization", format!("Bearer {}", api_key))
@@ -87,10 +94,7 @@ async fn fetch_gemini_models(api_key: &str) -> Result<Vec<String>, String> {
         "https://generativelanguage.googleapis.com/v1beta/models?key={}",
         api_key
     );
-    let client = reqwest::Client::builder()
-        .timeout(std::time::Duration::from_secs(10))
-        .build()
-        .map_err(|e| e.to_string())?;
+    let client = get_http_client();
     let resp = client.get(&url).send().await
         .map_err(|e| format!("Network error: {}", e))?;
     if !resp.status().is_success() {
@@ -117,6 +121,7 @@ async fn fetch_gemini_models(api_key: &str) -> Result<Vec<String>, String> {
 #[cfg(test)]
 mod tests {
     use super::*;
+    use std::collections::HashMap;
 
     fn make_cfg(provider_type: &str, api_key: Option<&str>, base_url: Option<&str>) -> ProviderConfig {
         ProviderConfig {
