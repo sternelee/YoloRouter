@@ -68,6 +68,38 @@ pub enum ControlCommand {
     Reload,
 }
 
+// ─── Model fetch channel types ────────────────────────────────────────────────
+
+pub struct ModelFetchRequest {
+    pub provider_name: String,
+    pub config: crate::config::schema::ProviderConfig,
+}
+
+// ─── Provider tab view state ──────────────────────────────────────────────────
+
+#[derive(Debug, Clone)]
+pub enum ProviderViewState {
+    ProviderDetail,
+    FetchingModels,
+    ModelList {
+        models: Vec<String>,
+        selected: usize,
+    },
+    CostTierPicker {
+        model: String,
+        selected: usize,
+    },
+    ScenarioPicker {
+        model: String,
+        cost_tier: String,
+        selected: usize,
+        creating_new: bool,
+        new_name_input: String,
+    },
+    Done { message: String },
+    Error { message: String },
+}
+
 // ─── TuiApp State ────────────────────────────────────────────────────────────
 
 struct TuiApp {
@@ -85,6 +117,12 @@ struct TuiApp {
     cmd_tx: tokio::sync::mpsc::Sender<ControlCommand>,
     /// Receive results/status messages from the async HTTP task
     status_rx: mpsc::Receiver<String>,
+    /// Current view state for the Providers tab
+    provider_view: ProviderViewState,
+    /// Send model fetch requests to the background async task
+    model_req_tx: tokio::sync::mpsc::Sender<ModelFetchRequest>,
+    /// Receive model fetch results from the background async task
+    model_res_rx: std::sync::mpsc::Receiver<Result<Vec<String>, String>>,
 }
 
 impl TuiApp {
@@ -93,6 +131,8 @@ impl TuiApp {
         config_path: String,
         cmd_tx: tokio::sync::mpsc::Sender<ControlCommand>,
         status_rx: mpsc::Receiver<String>,
+        model_req_tx: tokio::sync::mpsc::Sender<ModelFetchRequest>,
+        model_res_rx: std::sync::mpsc::Receiver<Result<Vec<String>, String>>,
     ) -> Self {
         let mut provider_list_state = ListState::default();
         provider_list_state.select(Some(0));
@@ -113,6 +153,9 @@ impl TuiApp {
             active_override: None,
             cmd_tx,
             status_rx,
+            provider_view: ProviderViewState::ProviderDetail,
+            model_req_tx,
+            model_res_rx,
         }
     }
 }
@@ -190,9 +233,20 @@ impl TuiManager {
             }
         });
 
+        // Background task: fetch model lists from provider APIs
+        let (model_req_tx, mut model_req_rx) = tokio::sync::mpsc::channel::<ModelFetchRequest>(4);
+        let (model_res_tx, model_res_rx) = std::sync::mpsc::channel::<Result<Vec<String>, String>>();
+
+        tokio::spawn(async move {
+            while let Some(req) = model_req_rx.recv().await {
+                let result = crate::provider::models::fetch_provider_models(&req.config).await;
+                let _ = model_res_tx.send(result);
+            }
+        });
+
         // Run blocking TUI in a dedicated OS thread
         tokio::task::spawn_blocking(move || {
-            if let Err(e) = run_tui(config, config_path, cmd_tx, status_rx) {
+            if let Err(e) = run_tui(config, config_path, cmd_tx, status_rx, model_req_tx, model_res_rx) {
                 eprintln!("TUI error: {e}");
             }
         })
@@ -224,9 +278,11 @@ fn run_tui(
     config_path: String,
     cmd_tx: tokio::sync::mpsc::Sender<ControlCommand>,
     status_rx: mpsc::Receiver<String>,
+    model_req_tx: tokio::sync::mpsc::Sender<ModelFetchRequest>,
+    model_res_rx: std::sync::mpsc::Receiver<Result<Vec<String>, String>>,
 ) -> io::Result<()> {
     let mut terminal = setup_terminal()?;
-    let mut app = TuiApp::new(config, config_path, cmd_tx, status_rx);
+    let mut app = TuiApp::new(config, config_path, cmd_tx, status_rx, model_req_tx, model_res_rx);
     let result = event_loop(&mut terminal, &mut app);
     restore_terminal(&mut terminal);
     result
@@ -246,6 +302,19 @@ fn event_loop(
                 }
             }
             app.status_message = msg;
+        }
+
+        // Drain model fetch results
+        while let Ok(result) = app.model_res_rx.try_recv() {
+            if matches!(&app.provider_view, ProviderViewState::FetchingModels) {
+                app.provider_view = match result {
+                    Ok(models) if models.is_empty() => ProviderViewState::Error {
+                        message: "No models returned by this provider".to_string(),
+                    },
+                    Ok(models) => ProviderViewState::ModelList { models, selected: 0 },
+                    Err(e) => ProviderViewState::Error { message: e },
+                };
+            }
         }
 
         terminal.draw(|f| draw_ui(f, app))?;
