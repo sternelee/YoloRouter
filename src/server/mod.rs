@@ -46,9 +46,10 @@ pub struct AppState {
     pub router: Arc<Router>,
     pub stats: Arc<StatsCollector>,
     pub overrides: OverrideMap,
+    pub config_path: String,
 }
 
-pub async fn start_server(port: u16, config: crate::Config) -> Result<()> {
+pub async fn start_server(port: u16, config: crate::Config, config_path: String) -> Result<()> {
     let routing_engine = RoutingEngine::new_with_config(config.clone())?;
     let router = Arc::new(Router::new(routing_engine));
     let stats = Arc::new(StatsCollector::new());
@@ -59,6 +60,7 @@ pub async fn start_server(port: u16, config: crate::Config) -> Result<()> {
         router,
         stats,
         overrides,
+        config_path: config_path.clone(),
     });
 
     tracing::info!("Starting YoloRouter HTTP server on 127.0.0.1:{}", port);
@@ -78,6 +80,7 @@ pub async fn start_server(port: u16, config: crate::Config) -> Result<()> {
                 "/control/override/{endpoint}",
                 web::delete().to(control_clear_override),
             )
+            .route("/control/reload", web::post().to(control_reload))
             // Protocol adapters
             .route("/v1/anthropic", web::post().to(anthropic_proxy))
             .route(
@@ -205,6 +208,25 @@ async fn control_clear_override(
 ) -> Result<HttpResponse> {
     state.overrides.write().await.remove(path.as_str());
     Ok(HttpResponse::Ok().json(serde_json::json!({"cleared": path.as_str()})))
+}
+
+async fn control_reload(state: web::Data<AppState>) -> actix_web::Result<HttpResponse> {
+    match crate::Config::from_file(&state.config_path) {
+        Ok(new_config) => {
+            *state.config.write().await = new_config;
+            tracing::info!("Config hot-reloaded from {}", state.config_path);
+            Ok(HttpResponse::Ok().json(serde_json::json!({
+                "status": "reloaded",
+                "config_path": state.config_path,
+            })))
+        }
+        Err(e) => {
+            tracing::error!("Config reload failed: {}", e);
+            Ok(HttpResponse::InternalServerError().json(serde_json::json!({
+                "error": e.to_string(),
+            })))
+        }
+    }
 }
 
 // ─── Protocol adapters ────────────────────────────────────────────────────────

@@ -60,7 +60,7 @@ async fn main() -> yolo_router::Result<()> {
     tracing::info!("Providers configured: {:?}", config.providers().keys().collect::<Vec<_>>());
     tracing::info!("Scenarios configured: {:?}", config.scenarios().keys().collect::<Vec<_>>());
 
-    server::start_server(daemon_config.port, config).await?;
+    server::start_server(daemon_config.port, config, config_path.clone()).await?;
 
     Ok(())
 }
