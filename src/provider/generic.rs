@@ -45,7 +45,7 @@ impl Provider for GenericProvider {
             .json(&payload)
             .send()
             .await
-            .map_err(|e| crate::error::YoloRouterError::HttpError(e))?;
+            .map_err(crate::error::YoloRouterError::HttpError)?;
 
         if !response.status().is_success() {
             return Err(crate::error::YoloRouterError::RequestError(format!(
@@ -58,10 +58,11 @@ impl Provider for GenericProvider {
         let data: Value = response
             .json()
             .await
-            .map_err(|e| crate::error::YoloRouterError::HttpError(e))?;
+            .map_err(crate::error::YoloRouterError::HttpError)?;
 
-        let content = data["choices"][0]["message"]["content"]
-            .as_str()
+        let content = data["choices"]
+            .get(0)
+            .and_then(|c| c["message"]["content"].as_str())
             .unwrap_or("No response")
             .to_string();
 

@@ -47,6 +47,12 @@ pub struct ProviderRegistry {
     providers: HashMap<String, Arc<dyn Provider>>,
 }
 
+impl Default for ProviderRegistry {
+    fn default() -> Self {
+        Self::new()
+    }
+}
+
 impl ProviderRegistry {
     pub fn new() -> Self {
         Self {
@@ -58,8 +64,8 @@ impl ProviderRegistry {
         let mut registry = Self::new();
         for name in config.providers().keys() {
             // get_provider() applies ${ENV_VAR} expansion
-            let provider_config = config.get_provider(&name)?;
-            let provider = ProviderFactory::create_provider(&name, &provider_config)?;
+            let provider_config = config.get_provider(name)?;
+            let provider = ProviderFactory::create_provider(name, &provider_config)?;
             registry.providers.insert(name.to_string(), provider);
         }
         Ok(registry)

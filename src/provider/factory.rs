@@ -124,12 +124,18 @@ impl ProviderFactory {
                 let base_url = config
                     .base_url
                     .clone()
-                    .unwrap_or_else(|| "https://api.example.com/v1".to_string());
+                    .ok_or_else(|| {
+                        YoloRouterError::ConfigError(format!(
+                            "Missing base_url for generic provider '{}'. \
+                             Set base_url in config (e.g., base_url = \"https://api.example.com/v1\")",
+                            config.provider_type
+                        ))
+                    })?;
                 Ok(Arc::new(GenericProvider::new(
                     name.to_string(),
                     api_key,
                     base_url,
-                    vec!["gpt-3.5".to_string()],
+                    vec![],
                 )))
             }
         }

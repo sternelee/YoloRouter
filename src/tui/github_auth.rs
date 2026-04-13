@@ -69,7 +69,7 @@ pub async fn run_github_device_flow(client_id: Option<String>) -> io::Result<Opt
         result
     })
     .await
-    .map_err(|e| io::Error::new(io::ErrorKind::Other, e.to_string()))??;
+    .map_err(|e| io::Error::other(e.to_string()))??;
 
     match tui_result {
         Some(token) => Ok(Some(token)),
@@ -294,7 +294,7 @@ fn draw_waiting(
         )),
         Line::from(""),
         Line::from(Span::styled(
-            format!("  ┌─────────────┐"),
+            "  ┌─────────────┐".to_string(),
             Style::default().fg(Color::White),
         )),
         Line::from(Span::styled(
@@ -304,7 +304,7 @@ fn draw_waiting(
                 .add_modifier(Modifier::BOLD),
         )),
         Line::from(Span::styled(
-            format!("  └─────────────┘"),
+            "  └─────────────┘".to_string(),
             Style::default().fg(Color::White),
         )),
         Line::from(""),

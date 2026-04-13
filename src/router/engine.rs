@@ -1,5 +1,5 @@
 use super::{FallbackChain, ProviderRegistry};
-use crate::analyzer::{match_scenario, FastAnalyzer, ModelCandidate};
+use crate::analyzer::{match_scenario, FastAnalyzer, ModelCandidate, ScenarioMeta};
 use crate::config::Config;
 use crate::models::{ChatRequest, ChatResponse};
 use crate::Result;
@@ -59,7 +59,37 @@ impl RoutingEngine {
                 .await;
         }
 
-        // Auto-routing via analyzer — used ONLY by /v1/auto endpoint
+        // Direct routing: "provider:model" format — user explicitly chose provider
+        // Skip when model is "auto" to let the analyzer handle it
+        if request.model != "auto" {
+            let model_parts: Vec<&str> = request.model.split(':').collect();
+            if model_parts.len() == 2 {
+                let provider_name = model_parts[0];
+                if let Some(provider) = self.registry.get(provider_name) {
+                    tracing::info!(
+                        provider = provider_name,
+                        model = model_parts[1],
+                        "Direct routing via provider:model format"
+                    );
+                    let mut req = request.clone();
+                    req.model = model_parts[1].to_string();
+                    return timeout(timeout_duration, provider.send_request(&req))
+                        .await
+                        .map_err(|_| {
+                            crate::error::YoloRouterError::RequestError(
+                                "Request timeout".to_string(),
+                            )
+                        })?;
+                } else {
+                    tracing::warn!(
+                        provider = provider_name,
+                        "Provider not found for direct routing, falling back to auto-routing"
+                    );
+                }
+            }
+        }
+
+        // Auto-routing via analyzer
         let scenarios = config.scenarios();
         if !scenarios.is_empty() {
             let candidates: Vec<ModelCandidate> = scenarios
@@ -79,7 +109,7 @@ impl RoutingEngine {
                 .analyzer
                 .analyze_and_score(&request.messages, &candidates);
 
-            let scenario_data: Vec<(&str, &[String], &[String], i32, bool)> = scenarios
+            let scenario_data: Vec<ScenarioMeta<'_>> = scenarios
                 .iter()
                 .map(|(name, sc)| {
                     (
@@ -107,19 +137,6 @@ impl RoutingEngine {
                 return self
                     .route_via_scenario(request, &scenario_name, &config, timeout_duration)
                     .await;
-            }
-        }
-
-        // Direct routing: "provider:model" format
-        let model_parts: Vec<&str> = request.model.split(':').collect();
-        if model_parts.len() == 2 {
-            let provider_name = model_parts[0];
-            if let Some(provider) = self.registry.get(provider_name) {
-                return timeout(timeout_duration, provider.send_request(request))
-                    .await
-                    .map_err(|_| {
-                        crate::error::YoloRouterError::RequestError("Request timeout".to_string())
-                    })?;
             }
         }
 

@@ -33,7 +33,7 @@ impl Config {
     }
 
     pub fn from_string(content: &str) -> Result<Self> {
-        toml::from_str(content).map_err(|e| YoloRouterError::TomlError(e))
+        toml::from_str(content).map_err(YoloRouterError::TomlError)
     }
 
     pub fn to_string(&self) -> Result<String> {
@@ -43,7 +43,7 @@ impl Config {
 
     pub fn save_to_file(&self, path: impl AsRef<Path>) -> Result<()> {
         let content = self.to_string()?;
-        fs::write(path, content).map_err(|e| YoloRouterError::IoError(e))
+        fs::write(path, content).map_err(YoloRouterError::IoError)
     }
 
     pub fn daemon(&self) -> DaemonConfig {

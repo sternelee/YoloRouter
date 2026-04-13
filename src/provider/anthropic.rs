@@ -34,6 +34,7 @@ impl Provider for AnthropicProvider {
         let url = format!("{}/v1/messages", self.base_url);
 
         // Separate system messages from the conversation
+        // Prefer the top-level system field (from AnthropicRequest); only scan messages as fallback
         let system: Option<String> = request.system.clone().or_else(|| {
             request
                 .messages
@@ -67,7 +68,7 @@ impl Provider for AnthropicProvider {
             .json(&payload)
             .send()
             .await
-            .map_err(|e| crate::error::YoloRouterError::HttpError(e))?;
+            .map_err(crate::error::YoloRouterError::HttpError)?;
 
         if !response.status().is_success() {
             return Err(crate::error::YoloRouterError::RequestError(format!(
@@ -79,7 +80,7 @@ impl Provider for AnthropicProvider {
         let data: Value = response
             .json()
             .await
-            .map_err(|e| crate::error::YoloRouterError::HttpError(e))?;
+            .map_err(crate::error::YoloRouterError::HttpError)?;
 
         let content = data["content"]
             .get(0)

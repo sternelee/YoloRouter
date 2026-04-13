@@ -73,10 +73,10 @@ impl StatsCollector {
         let mut requests = self.requests.write().await;
         requests.push(record);
 
-        // Keep only last 1000 requests using drain instead of remove(0)
+        // Keep only last 1000 requests
         if requests.len() > 1000 {
             let to_remove = requests.len() - 1000;
-            let _: Vec<_> = requests.drain(0..to_remove).collect();
+            requests.drain(0..to_remove);
         }
     }
 

@@ -47,7 +47,7 @@ impl Provider for OpenAIProvider {
             .json(&payload)
             .send()
             .await
-            .map_err(|e| crate::error::YoloRouterError::HttpError(e))?;
+            .map_err(crate::error::YoloRouterError::HttpError)?;
 
         if !response.status().is_success() {
             return Err(crate::error::YoloRouterError::RequestError(format!(
@@ -59,7 +59,7 @@ impl Provider for OpenAIProvider {
         let data: Value = response
             .json()
             .await
-            .map_err(|e| crate::error::YoloRouterError::HttpError(e))?;
+            .map_err(crate::error::YoloRouterError::HttpError)?;
 
         let content = data["choices"]
             .get(0)

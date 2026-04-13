@@ -356,10 +356,10 @@ async fn auto_route(
     state: web::Data<AppState>,
     req: web::Json<ChatRequest>,
 ) -> Result<HttpResponse> {
-    let scenario = extract_scenario(&req);
     let start = std::time::Instant::now();
 
-    match state.router.route(&req, scenario.as_deref()).await {
+    // Always let the analyzer decide — no hardcoded scenario extraction
+    match state.router.route(&req, None).await {
         Ok(response) => {
             let elapsed = start.elapsed().as_millis() as u64;
             state
@@ -379,15 +379,5 @@ async fn auto_route(
                 "error": { "message": e.to_string(), "type": "api_error" }
             })))
         }
-    }
-}
-
-fn extract_scenario(request: &ChatRequest) -> Option<String> {
-    if request.model.contains("coding") {
-        Some("coding".to_string())
-    } else if request.model.contains("analysis") {
-        Some("analysis".to_string())
-    } else {
-        None
     }
 }

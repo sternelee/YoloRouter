@@ -5,6 +5,9 @@ use crate::models::ChatMessage;
 use serde::{Deserialize, Serialize};
 use std::collections::HashMap;
 
+/// Scenario metadata tuple: (name, match_task_types, match_languages, priority, is_default)
+pub type ScenarioMeta<'a> = (&'a str, &'a [String], &'a [String], i32, bool);
+
 // ─── Public Types ─────────────────────────────────────────────────────────────
 
 /// Detected language of the request
@@ -762,7 +765,7 @@ fn feature_score(vision: bool, tools: bool) -> f32 {
 /// `scenario_metadata` entries: (name, match_task_types, match_languages, priority, is_default)
 pub fn match_scenario(
     analysis: &RequestAnalysis,
-    scenario_metadata: &[(&str, &[String], &[String], i32, bool)],
+    scenario_metadata: &[ScenarioMeta<'_>],
     confidence_threshold: f32,
 ) -> Option<String> {
     // If confidence is too low, skip content-based matching and use default
@@ -782,10 +785,8 @@ pub fn match_scenario(
         let lang_match =
             languages.is_empty() || languages.iter().any(|l| l == lang_str || l == "mixed");
 
-        if task_match && lang_match {
-            if best.is_none() || *priority > best.unwrap().1 {
-                best = Some((name, *priority));
-            }
+        if task_match && lang_match && (best.is_none() || *priority > best.unwrap().1) {
+            best = Some((name, *priority));
         }
     }
 

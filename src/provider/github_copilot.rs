@@ -41,9 +41,25 @@ pub struct AccessTokenResponse {
 #[derive(Debug, Deserialize, Serialize, Clone)]
 pub struct CopilotToken {
     pub token: String,
+    #[serde(default, deserialize_with = "deserialize_optional_int_as_string")]
     pub expires_at: Option<String>,
     #[serde(rename = "sku")]
     pub sku: Option<String>,
+}
+
+/// Deserialize an optional field that can be either a string or an integer (Unix timestamp).
+fn deserialize_optional_int_as_string<'de, D>(
+    deserializer: D,
+) -> std::result::Result<Option<String>, D::Error>
+where
+    D: serde::Deserializer<'de>,
+{
+    let value: Option<Value> = Option::deserialize(deserializer)?;
+    match value {
+        Some(Value::String(s)) => Ok(Some(s)),
+        Some(Value::Number(n)) => Ok(Some(n.to_string())),
+        _ => Ok(None),
+    }
 }
 
 pub struct GitHubCopilotProvider {
@@ -156,12 +172,28 @@ impl GitHubCopilotProvider {
 
     /// Exchange GitHub token for Copilot API token
     async fn get_copilot_token(&self) -> Result<String> {
-        // Check cached token first
+        // Check cached token with expiry
         {
             let cached = self.copilot_token.read().await;
             if let Some(ref token) = *cached {
-                // TODO: check expiry
-                return Ok(token.token.clone());
+                if let Some(ref expires_at) = token.expires_at {
+                    if let Ok(ts) = expires_at.parse::<i64>() {
+                        let now = std::time::SystemTime::now()
+                            .duration_since(std::time::UNIX_EPOCH)
+                            .unwrap_or_default()
+                            .as_secs() as i64;
+                        // Refresh 60s before expiry
+                        if now < ts - 60 {
+                            return Ok(token.token.clone());
+                        }
+                        // Token expired or expiring soon — fall through to refresh
+                        tracing::info!("Copilot token expired or expiring soon, refreshing");
+                    }
+                }
+                // No expires_at or unparseable — use cached token as-is
+                else {
+                    return Ok(token.token.clone());
+                }
             }
         }
 
@@ -176,7 +208,7 @@ impl GitHubCopilotProvider {
             .header("Editor-Plugin-Version", COPILOT_PLUGIN_VERSION)
             .send()
             .await
-            .map_err(|e| crate::error::YoloRouterError::HttpError(e))?;
+            .map_err(crate::error::YoloRouterError::HttpError)?;
 
         if !resp.status().is_success() {
             return Err(crate::error::YoloRouterError::RequestError(format!(
@@ -188,7 +220,7 @@ impl GitHubCopilotProvider {
         let copilot_token: CopilotToken = resp
             .json()
             .await
-            .map_err(|e| crate::error::YoloRouterError::HttpError(e))?;
+            .map_err(crate::error::YoloRouterError::HttpError)?;
 
         let token = copilot_token.token.clone();
 
@@ -232,7 +264,7 @@ impl Provider for GitHubCopilotProvider {
             .json(&payload)
             .send()
             .await
-            .map_err(|e| crate::error::YoloRouterError::HttpError(e))?;
+            .map_err(crate::error::YoloRouterError::HttpError)?;
 
         if !response.status().is_success() {
             let status = response.status();
@@ -246,7 +278,7 @@ impl Provider for GitHubCopilotProvider {
         let data: Value = response
             .json()
             .await
-            .map_err(|e| crate::error::YoloRouterError::HttpError(e))?;
+            .map_err(crate::error::YoloRouterError::HttpError)?;
 
         let content = data["choices"]
             .get(0)
@@ -283,12 +315,20 @@ impl Provider for GitHubCopilotProvider {
 
     fn model_list(&self) -> Vec<String> {
         vec![
-            "gpt-4o".to_string(),
-            "gpt-4".to_string(),
-            "gpt-3.5-turbo".to_string(),
-            "claude-3.5-sonnet".to_string(),
-            "o1-preview".to_string(),
-            "o1-mini".to_string(),
+            "gpt-5.4".to_string(),
+            "gpt-5.3-codex".to_string(),
+            "gpt-5.2-codex".to_string(),
+            "gpt-5.2".to_string(),
+            "gpt-5.1".to_string(),
+            "gpt-5.4-mini".to_string(),
+            "gpt-5-mini".to_string(),
+            "gpt-4.1".to_string(),
+            "claude-sonnet-4.6".to_string(),
+            "claude-sonnet-4.5".to_string(),
+            "claude-haiku-4.5".to_string(),
+            "claude-opus-4.6".to_string(),
+            "claude-opus-4.5".to_string(),
+            "claude-sonnet-4".to_string(),
         ]
     }
 }

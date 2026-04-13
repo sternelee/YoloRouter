@@ -91,7 +91,7 @@ impl Provider for CodexProvider {
             .json(&payload)
             .send()
             .await
-            .map_err(|e| crate::error::YoloRouterError::HttpError(e))?;
+            .map_err(crate::error::YoloRouterError::HttpError)?;
 
         if !response.status().is_success() {
             let status = response.status();
@@ -105,7 +105,7 @@ impl Provider for CodexProvider {
         let data: Value = response
             .json()
             .await
-            .map_err(|e| crate::error::YoloRouterError::HttpError(e))?;
+            .map_err(crate::error::YoloRouterError::HttpError)?;
 
         let content = data["choices"]
             .get(0)

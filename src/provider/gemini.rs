@@ -31,26 +31,46 @@ impl GeminiProvider {
 #[async_trait]
 impl Provider for GeminiProvider {
     async fn send_request(&self, request: &ChatRequest) -> Result<ChatResponse> {
-        let url = format!(
-            "{}/v1beta/models/gemini-pro:generateContent?key={}",
-            self.base_url, self.api_key
-        );
+        let model = if request.model.is_empty() || request.model == "auto" {
+            "gemini-pro"
+        } else {
+            &request.model
+        };
+        let url = format!("{}/v1beta/models/{}:generateContent", self.base_url, model);
 
-        let payload = json!({
-            "contents": [{
+        let mut contents = serde_json::Map::new();
+        contents.insert(
+            "contents".to_string(),
+            json!([{
                 "parts": request.messages.iter().map(|m| {
                     json!({ "text": &m.content })
                 }).collect::<Vec<_>>()
-            }]
-        });
+            }]),
+        );
+
+        let mut payload = Value::Object(contents);
+
+        // Pass through generation config if set
+        let mut gen_config = serde_json::Map::new();
+        if let Some(temp) = request.temperature {
+            gen_config.insert("temperature".to_string(), json!(temp));
+        }
+        if let Some(max_tokens) = request.max_tokens {
+            gen_config.insert("maxOutputTokens".to_string(), json!(max_tokens));
+        }
+        if !gen_config.is_empty() {
+            payload["generationConfig"] = Value::Object(gen_config);
+        }
 
         let response = self
             .client
             .post(&url)
+            .header("Content-Type", "application/json")
+            .header("x-goog-api-key", &self.api_key)
             .json(&payload)
             .send()
             .await
-            .map_err(|e| crate::error::YoloRouterError::HttpError(e))?;
+            .map_err(crate::error::YoloRouterError::HttpError)?;
 
         if !response.status().is_success() {
             return Err(crate::error::YoloRouterError::RequestError(format!(
@@ -62,7 +82,7 @@ impl Provider for GeminiProvider {
         let data: Value = response
             .json()
             .await
-            .map_err(|e| crate::error::YoloRouterError::HttpError(e))?;
+            .map_err(crate::error::YoloRouterError::HttpError)?;
 
         let content = data["candidates"]
             .get(0)

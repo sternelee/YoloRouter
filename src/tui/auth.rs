@@ -49,6 +49,12 @@ enum AuthStep {
     Complete,
 }
 
+impl Default for AuthFlow {
+    fn default() -> Self {
+        Self::new()
+    }
+}
+
 impl AuthFlow {
     pub fn new() -> Self {
         Self {

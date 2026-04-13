@@ -155,10 +155,13 @@ retry_count = 2
 ## Common Pitfalls
 
 1. **Integration test fails** — `ChatRequest` struct changed; add missing `system: Option<String>` to test initialization
-2. **Config not loading** — Check env vars are exported (`export ANTHROPIC_API_KEY="..."`) and config file path is correct
+2. **Config not loading** — Check env vars are exported (`export ANTHROPIC_API_KEY="***"`) and config file path is correct
 3. **Provider returns error** — In dev, providers return placeholder responses. To integrate real APIs, update `src/provider/{name}.rs:send_request()`
 4. **TUI auth doesn't persist** — Auth credentials are saved to `~/.config/yolo-router/providers.json` (see `tui/auth.rs` for path); ensure directory exists
 5. **Port already in use** — Change `[daemon] port` in config or kill existing process
+6. **`provider:model` routing ignored** — Direct routing (`github_copilot:gpt-5-mini`) must be checked BEFORE auto-routing in `router/engine.rs:route()`. If auto-routing runs first, analyzer may match a default scenario and hijack the request. The `provider:model` split also must strip the prefix before forwarding (set `req.model = model_parts[1]`)
+7. **GitHub Copilot API type mismatch** — `CopilotToken.expires_at` comes as integer Unix timestamp but was declared `Option<String>`. Use custom `deserialize_optional_int_as_string` deserializer to handle both formats (`src/provider/github_copilot.rs`)
+8. **Clippy warnings** — Run `cargo clippy --fix --lib -p yolo-router --allow-dirty --allow-staged` to auto-fix. Common: redundant closures, `io::Error::other()`, useless `format!()`
 
 ## Why Features Exist
 
