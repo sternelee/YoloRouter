@@ -455,27 +455,24 @@ impl Provider for CodexOAuthProvider {
     fn model_list(&self) -> Vec<String> {
         vec![
             // GPT-5 series (latest frontier models)
-            "gpt-5.4".to_string(),              // Current - Latest frontier agentic coding model
-            "gpt-5.4-mini".to_string(),         // Smaller frontier agentic coding model
-            "gpt-5.3-codex".to_string(),        // Frontier Codex-optimized agentic coding model
-            "gpt-5.2".to_string(),              // Optimized for professional work and long-running agents
-            "gpt-5.2-codex".to_string(),        // Codex variant
-            "gpt-5.1".to_string(),              // Previous stable release
-            "gpt-5-mini".to_string(),           // Lightweight variant
-            
+            "gpt-5.4".to_string(), // Current - Latest frontier agentic coding model
+            "gpt-5.4-mini".to_string(), // Smaller frontier agentic coding model
+            "gpt-5.3-codex".to_string(), // Frontier Codex-optimized agentic coding model
+            "gpt-5.2".to_string(), // Optimized for professional work and long-running agents
+            "gpt-5.2-codex".to_string(), // Codex variant
+            "gpt-5.1".to_string(), // Previous stable release
+            "gpt-5-mini".to_string(), // Lightweight variant
             // GPT-4 series (stable)
-            "gpt-4o".to_string(),               // GPT-4 optimized
-            "gpt-4o-mini".to_string(),          // Lightweight GPT-4o
-            "gpt-4-turbo".to_string(),          // High-performance variant
-            "gpt-4".to_string(),                // Base GPT-4
-            
+            "gpt-4o".to_string(),      // GPT-4 optimized
+            "gpt-4o-mini".to_string(), // Lightweight GPT-4o
+            "gpt-4-turbo".to_string(), // High-performance variant
+            "gpt-4".to_string(),       // Base GPT-4
             // Reasoning models (o-series)
-            "o1".to_string(),                   // Latest reasoning model
-            "o1-preview".to_string(),           // Preview of o1
-            "o1-mini".to_string(),              // Lightweight reasoning
-            
+            "o1".to_string(),         // Latest reasoning model
+            "o1-preview".to_string(), // Preview of o1
+            "o1-mini".to_string(),    // Lightweight reasoning
             // Legacy models
-            "gpt-3.5-turbo".to_string(),        // Previous generation
+            "gpt-3.5-turbo".to_string(), // Previous generation
         ]
     }
 }

@@ -111,19 +111,19 @@ impl Config {
         let scenario = scenarios.get_mut(scenario_name).ok_or_else(|| {
             YoloRouterError::ConfigError(format!("Scenario '{}' not found", scenario_name))
         })?;
-        
+
         // Check if this exact model already exists in the scenario
         let already_exists = scenario.models.iter().any(|m| {
             m.provider == provider && m.model == model && m.cost_tier.as_deref() == Some(cost_tier)
         });
-        
+
         if already_exists {
             return Err(YoloRouterError::ConfigError(format!(
                 "Model '{}' from provider '{}' with cost tier '{}' already exists in scenario '{}'",
                 model, provider, cost_tier, scenario_name
             )));
         }
-        
+
         scenario.models.push(ModelConfig {
             provider: provider.to_string(),
             model: model.to_string(),
@@ -316,7 +316,7 @@ fallback_enabled = true
         let result = cfg.add_model_to_scenario("coding", "openai", "gpt-4", "high");
         assert!(result.is_err());
         assert!(result.unwrap_err().to_string().contains("already exists"));
-        
+
         // Verify the models list is unchanged
         let scenarios = cfg.scenarios();
         let models = &scenarios["coding"].models;

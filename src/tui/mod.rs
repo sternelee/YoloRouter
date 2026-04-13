@@ -477,16 +477,21 @@ fn handle_tab_key(app: &mut TuiApp, key: KeyCode) {
                     }
                 }
 
-                ProviderViewState::ModelList { models, selected, search_query } => {
+                ProviderViewState::ModelList {
+                    models,
+                    selected,
+                    search_query,
+                } => {
                     // 计算搜索过滤后的模型列表
                     let filtered_models: Vec<&String> = if search_query.is_empty() {
                         models.iter().collect()
                     } else {
-                        models.iter()
+                        models
+                            .iter()
                             .filter(|m| m.to_lowercase().contains(&search_query.to_lowercase()))
                             .collect()
                     };
-                    
+
                     match key {
                         KeyCode::Down => {
                             let next = if filtered_models.is_empty() {
@@ -1037,32 +1042,34 @@ fn draw_providers(f: &mut ratatui::Frame, app: &mut TuiApp, area: ratatui::layou
             f.render_widget(para, panes[1]);
         }
 
-        ProviderViewState::ModelList { models, selected, search_query } => {
+        ProviderViewState::ModelList {
+            models,
+            selected,
+            search_query,
+        } => {
             // 过滤模型
             let filtered_models: Vec<&String> = if search_query.is_empty() {
                 models.iter().collect()
             } else {
-                models.iter()
+                models
+                    .iter()
                     .filter(|m| m.to_lowercase().contains(&search_query.to_lowercase()))
                     .collect()
             };
-            
+
             let mut state = ListState::default();
             state.select(Some(selected.min(filtered_models.len().saturating_sub(1))));
-            
+
             // 创建搜索栏和模型列表
             let mut lines = vec![
                 Line::from(vec![
                     Span::styled("Search: ", Style::default().fg(Color::Cyan)),
-                    Span::styled(
-                        search_query.as_str(),
-                        Style::default().fg(Color::Yellow)
-                    ),
+                    Span::styled(search_query.as_str(), Style::default().fg(Color::Yellow)),
                     Span::raw("_"),
                 ]),
                 Line::from(""),
             ];
-            
+
             // 添加过滤后的模型（支持键盘导航）
             for (i, model) in filtered_models.iter().enumerate() {
                 let is_selected = i == selected;
@@ -1074,29 +1081,28 @@ fn draw_providers(f: &mut ratatui::Frame, app: &mut TuiApp, area: ratatui::layou
                 } else {
                     Style::default()
                 };
-                lines.push(Line::from(Span::styled(format!("{}{}", prefix, model), style)));
+                lines.push(Line::from(Span::styled(
+                    format!("{}{}", prefix, model),
+                    style,
+                )));
             }
-            
+
             if filtered_models.is_empty() {
                 lines.push(Line::from(Span::styled(
                     "  (no matches)",
                     Style::default().fg(Color::DarkGray),
                 )));
             }
-            
+
             lines.push(Line::from(""));
             lines.push(Line::from(Span::styled(
                 "  Type to search  Enter=select  Esc=back",
                 Style::default().fg(Color::DarkGray),
             )));
-            
-            let title = format!(
-                " Models ({}/{}) ",
-                filtered_models.len(),
-                models.len()
-            );
-            let para = Paragraph::new(lines)
-                .block(Block::default().borders(Borders::ALL).title(title));
+
+            let title = format!(" Models ({}/{}) ", filtered_models.len(), models.len());
+            let para =
+                Paragraph::new(lines).block(Block::default().borders(Borders::ALL).title(title));
             f.render_widget(para, panes[1]);
         }
 

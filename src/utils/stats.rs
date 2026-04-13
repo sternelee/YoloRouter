@@ -189,7 +189,11 @@ mod tests {
                 .await;
         }
         let g = collector.inner.lock().await;
-        assert_eq!(g.records.len(), 1000, "ring buffer should cap at 1000 entries");
+        assert_eq!(
+            g.records.len(),
+            1000,
+            "ring buffer should cap at 1000 entries"
+        );
         assert_eq!(g.total_requests, 1200, "all requests should be counted");
     }
 }

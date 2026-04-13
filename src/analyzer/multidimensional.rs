@@ -313,9 +313,9 @@ impl FastAnalyzer {
 
     fn default_perf_matrix() -> HashMap<String, [f32; 15]> {
         let mut m: HashMap<String, [f32; 15]> = HashMap::new();
-        
+
         // ─── OpenAI GPT-5 Series (Latest Frontier Agentic Models) ───────────────────
-        
+
         m.insert(
             "gpt-5.4".to_string(),
             [
@@ -358,9 +358,9 @@ impl FastAnalyzer {
                 88., 70., 85., 90., 80., 70., 85., 75., 82., 78., 80., 85., 88., 92., 88.,
             ],
         );
-        
+
         // ─── OpenAI GPT-4 Series (Stable, Proven) ──────────────────────────────────
-        
+
         m.insert(
             "gpt-4o".to_string(),
             [
@@ -385,9 +385,9 @@ impl FastAnalyzer {
                 88., 50., 85., 90., 65., 50., 88., 80., 85., 85., 90., 88., 88., 92., 88.,
             ],
         );
-        
+
         // ─── OpenAI Reasoning Models (o-series) ─────────────────────────────────────
-        
+
         m.insert(
             "o1".to_string(),
             [
@@ -406,18 +406,18 @@ impl FastAnalyzer {
                 92., 70., 75., 95., 80., 70., 88., 78., 82., 82., 78., 88., 95., 85., 88.,
             ],
         );
-        
+
         // ─── Legacy Models ──────────────────────────────────────────────────────────
-        
+
         m.insert(
             "gpt-3.5-turbo".to_string(),
             [
                 62., 90., 97., 68., 95., 90., 85., 72., 78., 70., 72., 72., 62., 72., 75.,
             ],
         );
-        
+
         // ─── Anthropic Claude Series ────────────────────────────────────────────────
-        
+
         m.insert(
             "claude-opus-4.6".to_string(),
             [
@@ -448,13 +448,13 @@ impl FastAnalyzer {
                 65., 85., 95., 75., 90., 85., 90., 72., 80., 80., 75., 82., 72., 75., 80.,
             ],
         );
-        
+
         m
     }
 
     fn default_cost_table() -> HashMap<String, ModelCost> {
         let mut c: HashMap<String, ModelCost> = HashMap::new();
-        
+
         // ─── OpenAI GPT-5 Series Pricing ───────────────────────────────────────────
         c.insert(
             "gpt-5.4".to_string(),
@@ -505,7 +505,7 @@ impl FastAnalyzer {
                 output_price_per_1m_tokens: 2.0,
             },
         );
-        
+
         // ─── OpenAI GPT-4 Series Pricing ───────────────────────────────────────────
         c.insert(
             "gpt-4o".to_string(),
@@ -535,7 +535,7 @@ impl FastAnalyzer {
                 output_price_per_1m_tokens: 6.0,
             },
         );
-        
+
         // ─── OpenAI Reasoning Models (o-series) ────────────────────────────────────
         c.insert(
             "o1".to_string(),
@@ -558,7 +558,7 @@ impl FastAnalyzer {
                 output_price_per_1m_tokens: 12.0,
             },
         );
-        
+
         // ─── Legacy Models ─────────────────────────────────────────────────────────
         c.insert(
             "gpt-3.5-turbo".to_string(),
@@ -567,7 +567,7 @@ impl FastAnalyzer {
                 output_price_per_1m_tokens: 1.5,
             },
         );
-        
+
         // ─── Anthropic Claude Pricing (USD per 1M tokens) ──────────────────────────
         c.insert(
             "claude-opus-4.6".to_string(),
@@ -604,7 +604,7 @@ impl FastAnalyzer {
                 output_price_per_1m_tokens: 1.25,
             },
         );
-        
+
         c
     }
 }
