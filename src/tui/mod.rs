@@ -87,6 +87,7 @@ pub enum ProviderViewState {
     ModelList {
         models: Vec<String>,
         selected: usize,
+        search_query: String,
     },
     CostTierPicker {
         model: String,
@@ -348,6 +349,7 @@ fn event_loop(
                     Ok(models) => ProviderViewState::ModelList {
                         models,
                         selected: 0,
+                        search_query: String::new(),
                     },
                     Err(e) => ProviderViewState::Error { message: e },
                 };
@@ -475,34 +477,89 @@ fn handle_tab_key(app: &mut TuiApp, key: KeyCode) {
                     }
                 }
 
-                ProviderViewState::ModelList { models, selected } => {
+                ProviderViewState::ModelList { models, selected, search_query } => {
+                    // 计算搜索过滤后的模型列表
+                    let filtered_models: Vec<&String> = if search_query.is_empty() {
+                        models.iter().collect()
+                    } else {
+                        models.iter()
+                            .filter(|m| m.to_lowercase().contains(&search_query.to_lowercase()))
+                            .collect()
+                    };
+                    
                     match key {
-                        KeyCode::Down | KeyCode::Char('j') => {
-                            let next = if models.is_empty() {
+                        KeyCode::Down => {
+                            let next = if filtered_models.is_empty() {
                                 0
                             } else {
-                                (selected + 1) % models.len()
+                                (selected + 1) % filtered_models.len()
                             };
                             app.provider_view = ProviderViewState::ModelList {
                                 models,
                                 selected: next,
+                                search_query,
                             };
                         }
-                        KeyCode::Up | KeyCode::Char('k') => {
+                        KeyCode::Up => {
                             let prev = if selected == 0 {
-                                models.len().saturating_sub(1)
+                                filtered_models.len().saturating_sub(1)
                             } else {
                                 selected - 1
                             };
                             app.provider_view = ProviderViewState::ModelList {
                                 models,
                                 selected: prev,
+                                search_query,
+                            };
+                        }
+                        KeyCode::Char('j') => {
+                            let next = if filtered_models.is_empty() {
+                                0
+                            } else {
+                                (selected + 1) % filtered_models.len()
+                            };
+                            app.provider_view = ProviderViewState::ModelList {
+                                models,
+                                selected: next,
+                                search_query,
+                            };
+                        }
+                        KeyCode::Char('k') => {
+                            let prev = if selected == 0 {
+                                filtered_models.len().saturating_sub(1)
+                            } else {
+                                selected - 1
+                            };
+                            app.provider_view = ProviderViewState::ModelList {
+                                models,
+                                selected: prev,
+                                search_query,
+                            };
+                        }
+                        KeyCode::Char(c) => {
+                            // 输入搜索字符
+                            let mut query = search_query;
+                            query.push(c);
+                            app.provider_view = ProviderViewState::ModelList {
+                                models,
+                                selected: 0,
+                                search_query: query,
+                            };
+                        }
+                        KeyCode::Backspace => {
+                            // 删除搜索字符
+                            let mut query = search_query;
+                            query.pop();
+                            app.provider_view = ProviderViewState::ModelList {
+                                models,
+                                selected: 0,
+                                search_query: query,
                             };
                         }
                         KeyCode::Enter => {
-                            if let Some(model) = models.get(selected).cloned() {
+                            if let Some(model) = filtered_models.get(selected) {
                                 app.provider_view = ProviderViewState::CostTierPicker {
-                                    model,
+                                    model: model.to_string(),
                                     selected: 1, // default: medium
                                 };
                             }
@@ -980,22 +1037,67 @@ fn draw_providers(f: &mut ratatui::Frame, app: &mut TuiApp, area: ratatui::layou
             f.render_widget(para, panes[1]);
         }
 
-        ProviderViewState::ModelList { models, selected } => {
-            let items: Vec<ListItem> = models.iter().map(|m| ListItem::new(m.as_str())).collect();
+        ProviderViewState::ModelList { models, selected, search_query } => {
+            // 过滤模型
+            let filtered_models: Vec<&String> = if search_query.is_empty() {
+                models.iter().collect()
+            } else {
+                models.iter()
+                    .filter(|m| m.to_lowercase().contains(&search_query.to_lowercase()))
+                    .collect()
+            };
+            
             let mut state = ListState::default();
-            state.select(Some(selected));
-            let list = List::new(items)
-                .block(Block::default().borders(Borders::ALL).title(format!(
-                    " Models ({}) — Enter=select  Esc=back ",
-                    models.len()
-                )))
-                .highlight_style(
+            state.select(Some(selected.min(filtered_models.len().saturating_sub(1))));
+            
+            // 创建搜索栏和模型列表
+            let mut lines = vec![
+                Line::from(vec![
+                    Span::styled("Search: ", Style::default().fg(Color::Cyan)),
+                    Span::styled(
+                        search_query.as_str(),
+                        Style::default().fg(Color::Yellow)
+                    ),
+                    Span::raw("_"),
+                ]),
+                Line::from(""),
+            ];
+            
+            // 添加过滤后的模型（支持键盘导航）
+            for (i, model) in filtered_models.iter().enumerate() {
+                let is_selected = i == selected;
+                let prefix = if is_selected { "▶ " } else { "  " };
+                let style = if is_selected {
                     Style::default()
                         .fg(Color::Yellow)
-                        .add_modifier(Modifier::BOLD),
-                )
-                .highlight_symbol("▶ ");
-            f.render_stateful_widget(list, panes[1], &mut state);
+                        .add_modifier(Modifier::BOLD)
+                } else {
+                    Style::default()
+                };
+                lines.push(Line::from(Span::styled(format!("{}{}", prefix, model), style)));
+            }
+            
+            if filtered_models.is_empty() {
+                lines.push(Line::from(Span::styled(
+                    "  (no matches)",
+                    Style::default().fg(Color::DarkGray),
+                )));
+            }
+            
+            lines.push(Line::from(""));
+            lines.push(Line::from(Span::styled(
+                "  Type to search  Enter=select  Esc=back",
+                Style::default().fg(Color::DarkGray),
+            )));
+            
+            let title = format!(
+                " Models ({}/{}) ",
+                filtered_models.len(),
+                models.len()
+            );
+            let para = Paragraph::new(lines)
+                .block(Block::default().borders(Borders::ALL).title(title));
+            f.render_widget(para, panes[1]);
         }
 
         ProviderViewState::CostTierPicker { model, selected } => {
