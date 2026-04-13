@@ -314,109 +314,138 @@ impl FastAnalyzer {
     fn default_perf_matrix() -> HashMap<String, [f32; 15]> {
         let mut m: HashMap<String, [f32; 15]> = HashMap::new();
         
-        // Anthropic Claude models
+        // ─── OpenAI GPT-5 Series (Latest Frontier Agentic Models) ───────────────────
+        
         m.insert(
-            "anthropic/claude-opus-4-5".to_string(),
+            "gpt-5.4".to_string(),
             [
-                95., 20., 70., 97., 40., 20., 92., 80., 85., 90., 90., 95., 95., 88., 95.,
+                98., 5., 40., 99., 15., 5., 80., 60., 70., 75., 70., 80., 99., 99., 98.,
             ],
         );
         m.insert(
-            "anthropic/claude-3-5-sonnet".to_string(),
+            "gpt-5.4-mini".to_string(),
             [
-                90., 45., 78., 93., 55., 45., 90., 80., 85., 87., 88., 92., 90., 87., 90.,
+                95., 35., 65., 97., 50., 35., 85., 75., 80., 80., 80., 85., 96., 98., 95.,
             ],
         );
         m.insert(
-            "anthropic/claude-sonnet-4-5".to_string(),
+            "gpt-5.3-codex".to_string(),
             [
-                85., 55., 82., 90., 65., 55., 90., 78., 85., 85., 85., 90., 88., 85., 88.,
+                96., 25., 55., 98., 35., 25., 82., 70., 75., 78., 82., 82., 98., 99., 96.,
             ],
         );
         m.insert(
-            "anthropic/claude-haiku-4-5".to_string(),
+            "gpt-5.2".to_string(),
             [
-                65., 85., 95., 75., 90., 85., 90., 72., 80., 80., 75., 82., 72., 75., 80.,
+                94., 30., 60., 96., 45., 30., 84., 72., 78., 80., 78., 83., 95., 97., 94.,
+            ],
+        );
+        m.insert(
+            "gpt-5.2-codex".to_string(),
+            [
+                93., 28., 58., 95., 42., 28., 83., 71., 76., 78., 80., 82., 94., 98., 93.,
+            ],
+        );
+        m.insert(
+            "gpt-5.1".to_string(),
+            [
+                92., 32., 62., 94., 48., 32., 83., 70., 76., 78., 76., 82., 93., 96., 92.,
+            ],
+        );
+        m.insert(
+            "gpt-5-mini".to_string(),
+            [
+                88., 70., 85., 90., 80., 70., 85., 75., 82., 78., 80., 85., 88., 92., 88.,
             ],
         );
         
-        // OpenAI models
+        // ─── OpenAI GPT-4 Series (Stable, Proven) ──────────────────────────────────
+        
         m.insert(
-            "openai/gpt-4-turbo".to_string(),
-            [
-                92., 40., 75., 94., 55., 40., 92., 85., 87., 88., 92., 92., 92., 94., 92.,
-            ],
-        );
-        m.insert(
-            "openai/gpt-4o".to_string(),
+            "gpt-4o".to_string(),
             [
                 90., 45., 80., 92., 60., 45., 90., 82., 85., 82., 92., 90., 90., 93., 90.,
             ],
         );
         m.insert(
-            "openai/gpt-4o-mini".to_string(),
+            "gpt-4o-mini".to_string(),
             [
                 72., 82., 92., 78., 88., 82., 88., 75., 80., 75., 80., 80., 75., 80., 82.,
             ],
         );
         m.insert(
-            "openai/gpt-3.5-turbo".to_string(),
+            "gpt-4-turbo".to_string(),
             [
-                62., 90., 97., 68., 95., 90., 85., 72., 78., 70., 72., 72., 62., 72., 75.,
+                92., 40., 75., 94., 55., 40., 92., 85., 87., 88., 92., 92., 92., 94., 92.,
             ],
         );
         m.insert(
-            "openai/o1".to_string(),
+            "gpt-4".to_string(),
+            [
+                88., 50., 85., 90., 65., 50., 88., 80., 85., 85., 90., 88., 88., 92., 88.,
+            ],
+        );
+        
+        // ─── OpenAI Reasoning Models (o-series) ─────────────────────────────────────
+        
+        m.insert(
+            "o1".to_string(),
             [
                 98., 10., 45., 99., 20., 10., 85., 65., 75., 80., 75., 85., 99., 92., 95.,
             ],
         );
         m.insert(
-            "openai/o1-preview".to_string(),
+            "o1-preview".to_string(),
             [
                 95., 15., 50., 98., 25., 15., 88., 70., 80., 85., 80., 90., 98., 88., 90.,
             ],
         );
-        
-        // Google Gemini models
         m.insert(
-            "google/gemini-2.0-flash".to_string(),
+            "o1-mini".to_string(),
             [
-                82., 70., 88., 85., 80., 70., 85., 75., 82., 75., 90., 87., 82., 80., 87.,
-            ],
-        );
-        m.insert(
-            "google/gemini-1.5-pro".to_string(),
-            [
-                85., 50., 78., 88., 65., 50., 85., 75., 82., 78., 90., 88., 85., 80., 88.,
-            ],
-        );
-        m.insert(
-            "google/gemini-1.5-flash".to_string(),
-            [
-                75., 80., 88., 80., 85., 80., 82., 70., 78., 72., 85., 85., 75., 78., 82.,
+                92., 70., 75., 95., 80., 70., 88., 78., 82., 82., 78., 88., 95., 85., 88.,
             ],
         );
         
-        // GitHub Copilot (powered by GPT-4o)
+        // ─── Legacy Models ──────────────────────────────────────────────────────────
+        
         m.insert(
-            "github_copilot/gpt-4o".to_string(),
+            "gpt-3.5-turbo".to_string(),
             [
-                88., 70., 82., 90., 65., 70., 85., 78., 80., 75., 88., 85., 88., 92., 88.,
+                62., 90., 97., 68., 95., 90., 85., 72., 78., 70., 72., 72., 62., 72., 75.,
             ],
         );
         
-        // DeepSeek models (via OpenRouter)
+        // ─── Anthropic Claude Series ────────────────────────────────────────────────
+        
         m.insert(
-            "deepseek/deepseek-chat".to_string(),
+            "claude-opus-4.6".to_string(),
             [
-                80., 75., 85., 82., 80., 75., 82., 72., 78., 70., 85., 82., 80., 82., 82.,
+                96., 18., 68., 98., 38., 18., 93., 82., 87., 91., 92., 96., 96., 89., 96.,
             ],
         );
         m.insert(
-            "deepseek/deepseek-coder".to_string(),
+            "claude-opus-4.5".to_string(),
             [
-                85., 65., 88., 80., 85., 65., 85., 78., 82., 75., 92., 85., 75., 95., 80.,
+                95., 20., 70., 97., 40., 20., 92., 80., 85., 90., 90., 95., 95., 88., 95.,
+            ],
+        );
+        m.insert(
+            "claude-sonnet-4.6".to_string(),
+            [
+                92., 48., 80., 94., 62., 48., 92., 82., 87., 88., 88., 92., 92., 88., 92.,
+            ],
+        );
+        m.insert(
+            "claude-sonnet-4.5".to_string(),
+            [
+                85., 55., 82., 90., 65., 55., 90., 78., 85., 85., 85., 90., 88., 85., 88.,
+            ],
+        );
+        m.insert(
+            "claude-haiku-4.5".to_string(),
+            [
+                65., 85., 95., 75., 90., 85., 90., 72., 80., 80., 75., 82., 72., 75., 80.,
             ],
         );
         
@@ -426,125 +455,153 @@ impl FastAnalyzer {
     fn default_cost_table() -> HashMap<String, ModelCost> {
         let mut c: HashMap<String, ModelCost> = HashMap::new();
         
-        // Anthropic Claude pricing (USD per 1M tokens)
+        // ─── OpenAI GPT-5 Series Pricing ───────────────────────────────────────────
         c.insert(
-            "anthropic/claude-opus-4-5".to_string(),
+            "gpt-5.4".to_string(),
             ModelCost {
-                input_price_per_1m_tokens: 3.0,
-                output_price_per_1m_tokens: 15.0,
+                input_price_per_1m_tokens: 25.0,
+                output_price_per_1m_tokens: 100.0,
             },
         );
         c.insert(
-            "anthropic/claude-3-5-sonnet".to_string(),
+            "gpt-5.4-mini".to_string(),
             ModelCost {
-                input_price_per_1m_tokens: 3.0,
-                output_price_per_1m_tokens: 15.0,
+                input_price_per_1m_tokens: 5.0,
+                output_price_per_1m_tokens: 20.0,
             },
         );
         c.insert(
-            "anthropic/claude-sonnet-4-5".to_string(),
-            ModelCost {
-                input_price_per_1m_tokens: 1.0,
-                output_price_per_1m_tokens: 5.0,
-            },
-        );
-        c.insert(
-            "anthropic/claude-haiku-4-5".to_string(),
-            ModelCost {
-                input_price_per_1m_tokens: 0.25,
-                output_price_per_1m_tokens: 1.25,
-            },
-        );
-        
-        // OpenAI pricing
-        c.insert(
-            "openai/gpt-4-turbo".to_string(),
-            ModelCost {
-                input_price_per_1m_tokens: 10.0,
-                output_price_per_1m_tokens: 30.0,
-            },
-        );
-        c.insert(
-            "openai/gpt-4o".to_string(),
-            ModelCost {
-                input_price_per_1m_tokens: 2.5,
-                output_price_per_1m_tokens: 10.0,
-            },
-        );
-        c.insert(
-            "openai/gpt-4o-mini".to_string(),
-            ModelCost {
-                input_price_per_1m_tokens: 0.15,
-                output_price_per_1m_tokens: 0.6,
-            },
-        );
-        c.insert(
-            "openai/gpt-3.5-turbo".to_string(),
-            ModelCost {
-                input_price_per_1m_tokens: 0.5,
-                output_price_per_1m_tokens: 1.5,
-            },
-        );
-        c.insert(
-            "openai/o1".to_string(),
+            "gpt-5.3-codex".to_string(),
             ModelCost {
                 input_price_per_1m_tokens: 20.0,
                 output_price_per_1m_tokens: 80.0,
             },
         );
         c.insert(
-            "openai/o1-preview".to_string(),
+            "gpt-5.2".to_string(),
+            ModelCost {
+                input_price_per_1m_tokens: 18.0,
+                output_price_per_1m_tokens: 72.0,
+            },
+        );
+        c.insert(
+            "gpt-5.2-codex".to_string(),
+            ModelCost {
+                input_price_per_1m_tokens: 18.0,
+                output_price_per_1m_tokens: 72.0,
+            },
+        );
+        c.insert(
+            "gpt-5.1".to_string(),
             ModelCost {
                 input_price_per_1m_tokens: 15.0,
                 output_price_per_1m_tokens: 60.0,
             },
         );
-        
-        // Google Gemini pricing
         c.insert(
-            "google/gemini-2.0-flash".to_string(),
+            "gpt-5-mini".to_string(),
             ModelCost {
-                input_price_per_1m_tokens: 0.075,
-                output_price_per_1m_tokens: 0.3,
+                input_price_per_1m_tokens: 0.5,
+                output_price_per_1m_tokens: 2.0,
+            },
+        );
+        
+        // ─── OpenAI GPT-4 Series Pricing ───────────────────────────────────────────
+        c.insert(
+            "gpt-4o".to_string(),
+            ModelCost {
+                input_price_per_1m_tokens: 2.5,
+                output_price_per_1m_tokens: 10.0,
             },
         );
         c.insert(
-            "google/gemini-1.5-pro".to_string(),
+            "gpt-4o-mini".to_string(),
             ModelCost {
-                input_price_per_1m_tokens: 1.25,
+                input_price_per_1m_tokens: 0.15,
+                output_price_per_1m_tokens: 0.6,
+            },
+        );
+        c.insert(
+            "gpt-4-turbo".to_string(),
+            ModelCost {
+                input_price_per_1m_tokens: 10.0,
+                output_price_per_1m_tokens: 30.0,
+            },
+        );
+        c.insert(
+            "gpt-4".to_string(),
+            ModelCost {
+                input_price_per_1m_tokens: 3.0,
+                output_price_per_1m_tokens: 6.0,
+            },
+        );
+        
+        // ─── OpenAI Reasoning Models (o-series) ────────────────────────────────────
+        c.insert(
+            "o1".to_string(),
+            ModelCost {
+                input_price_per_1m_tokens: 20.0,
+                output_price_per_1m_tokens: 80.0,
+            },
+        );
+        c.insert(
+            "o1-preview".to_string(),
+            ModelCost {
+                input_price_per_1m_tokens: 15.0,
+                output_price_per_1m_tokens: 60.0,
+            },
+        );
+        c.insert(
+            "o1-mini".to_string(),
+            ModelCost {
+                input_price_per_1m_tokens: 3.0,
+                output_price_per_1m_tokens: 12.0,
+            },
+        );
+        
+        // ─── Legacy Models ─────────────────────────────────────────────────────────
+        c.insert(
+            "gpt-3.5-turbo".to_string(),
+            ModelCost {
+                input_price_per_1m_tokens: 0.5,
+                output_price_per_1m_tokens: 1.5,
+            },
+        );
+        
+        // ─── Anthropic Claude Pricing (USD per 1M tokens) ──────────────────────────
+        c.insert(
+            "claude-opus-4.6".to_string(),
+            ModelCost {
+                input_price_per_1m_tokens: 15.0,
+                output_price_per_1m_tokens: 60.0,
+            },
+        );
+        c.insert(
+            "claude-opus-4.5".to_string(),
+            ModelCost {
+                input_price_per_1m_tokens: 3.0,
+                output_price_per_1m_tokens: 15.0,
+            },
+        );
+        c.insert(
+            "claude-sonnet-4.6".to_string(),
+            ModelCost {
+                input_price_per_1m_tokens: 3.0,
+                output_price_per_1m_tokens: 15.0,
+            },
+        );
+        c.insert(
+            "claude-sonnet-4.5".to_string(),
+            ModelCost {
+                input_price_per_1m_tokens: 1.0,
                 output_price_per_1m_tokens: 5.0,
             },
         );
         c.insert(
-            "google/gemini-1.5-flash".to_string(),
+            "claude-haiku-4.5".to_string(),
             ModelCost {
-                input_price_per_1m_tokens: 0.075,
-                output_price_per_1m_tokens: 0.3,
-            },
-        );
-        
-        // GitHub Copilot (subscription-based, normalized to per-token cost)
-        c.insert(
-            "github_copilot/gpt-4o".to_string(),
-            ModelCost {
-                input_price_per_1m_tokens: 0.0,
-                output_price_per_1m_tokens: 0.0,
-            },
-        );
-        
-        // DeepSeek pricing (via OpenRouter or direct)
-        c.insert(
-            "deepseek/deepseek-chat".to_string(),
-            ModelCost {
-                input_price_per_1m_tokens: 0.14,
-                output_price_per_1m_tokens: 0.28,
-            },
-        );
-        c.insert(
-            "deepseek/deepseek-coder".to_string(),
-            ModelCost {
-                input_price_per_1m_tokens: 0.14,
-                output_price_per_1m_tokens: 0.28,
+                input_price_per_1m_tokens: 0.25,
+                output_price_per_1m_tokens: 1.25,
             },
         );
         
