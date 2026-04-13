@@ -1090,7 +1090,7 @@ mod tests {
         let general_types: Vec<String> = vec![];
         let all_langs: Vec<String> = vec![];
 
-        let metadata: Vec<(&str, &[String], &[String], i32, bool)> = vec![
+        let metadata: Vec<ScenarioMeta> = vec![
             ("coding", &coding_types, &all_langs, 100, false),
             ("general", &general_types, &all_langs, 50, true),
         ];
@@ -1131,7 +1131,7 @@ mod tests {
         let general_types: Vec<String> = vec![];
         let all_langs: Vec<String> = vec![];
 
-        let metadata: Vec<(&str, &[String], &[String], i32, bool)> = vec![
+        let metadata: Vec<ScenarioMeta> = vec![
             ("coding", &coding_types, &all_langs, 100, false),
             ("general", &general_types, &all_langs, 50, true),
         ];

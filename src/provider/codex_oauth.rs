@@ -510,7 +510,7 @@ mod tests {
 
     #[test]
     fn test_token_state_not_expiring() {
-        let later_ms = now_ms() + 3600_000; // expires in 1h
+        let later_ms = now_ms() + 3_600_000; // expires in 1h
         let state = CodexTokenState {
             access_token: Some("tok_abc".to_string()),
             refresh_token: None,
