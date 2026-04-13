@@ -97,6 +97,7 @@ impl Config {
     }
 
     /// Append a model entry to an existing scenario's model list.
+    /// Returns early if the exact same (provider, model, cost_tier) already exists.
     pub fn add_model_to_scenario(
         &mut self,
         scenario_name: &str,
@@ -110,6 +111,19 @@ impl Config {
         let scenario = scenarios.get_mut(scenario_name).ok_or_else(|| {
             YoloRouterError::ConfigError(format!("Scenario '{}' not found", scenario_name))
         })?;
+        
+        // Check if this exact model already exists in the scenario
+        let already_exists = scenario.models.iter().any(|m| {
+            m.provider == provider && m.model == model && m.cost_tier.as_deref() == Some(cost_tier)
+        });
+        
+        if already_exists {
+            return Err(YoloRouterError::ConfigError(format!(
+                "Model '{}' from provider '{}' with cost tier '{}' already exists in scenario '{}'",
+                model, provider, cost_tier, scenario_name
+            )));
+        }
+        
         scenario.models.push(ModelConfig {
             provider: provider.to_string(),
             model: model.to_string(),
@@ -274,6 +288,44 @@ fallback_enabled = true
         assert_eq!(models[1].model, "gpt-4o");
         assert_eq!(models[1].provider, "openai");
         assert_eq!(models[1].cost_tier.as_deref(), Some("medium"));
+    }
+
+    #[test]
+    fn test_add_model_rejects_duplicate_in_scenario() {
+        let mut cfg = base_config();
+        // Try to add the same model that already exists in 'coding' scenario
+        let result = cfg.add_model_to_scenario("coding", "openai", "gpt-4", "high");
+        assert!(result.is_err());
+        assert!(result.unwrap_err().to_string().contains("already exists"));
+        
+        // Verify the models list is unchanged
+        let scenarios = cfg.scenarios();
+        let models = &scenarios["coding"].models;
+        assert_eq!(models.len(), 1);
+    }
+
+    #[test]
+    fn test_add_different_model_same_provider_allowed() {
+        let mut cfg = base_config();
+        // Add a different model from the same provider (should succeed)
+        cfg.add_model_to_scenario("coding", "openai", "gpt-4o", "medium")
+            .unwrap();
+        let scenarios = cfg.scenarios();
+        let models = &scenarios["coding"].models;
+        assert_eq!(models.len(), 2);
+    }
+
+    #[test]
+    fn test_add_same_model_different_cost_tier_allowed() {
+        let mut cfg = base_config();
+        // Add the same model but with different cost tier (should succeed)
+        cfg.add_model_to_scenario("coding", "openai", "gpt-4", "low")
+            .unwrap();
+        let scenarios = cfg.scenarios();
+        let models = &scenarios["coding"].models;
+        assert_eq!(models.len(), 2);
+        assert_eq!(models[0].cost_tier.as_deref(), Some("high"));
+        assert_eq!(models[1].cost_tier.as_deref(), Some("low"));
     }
 
     #[test]
