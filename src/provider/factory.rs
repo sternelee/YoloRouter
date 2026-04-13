@@ -1,6 +1,7 @@
 use super::*;
 use crate::config::schema::ProviderConfig;
 use crate::{Result, YoloRouterError};
+use std::path::PathBuf;
 use std::sync::Arc;
 
 pub struct ProviderFactory;
@@ -38,6 +39,7 @@ impl ProviderFactory {
                     .token
                     .clone()
                     .or_else(|| config.api_key.clone())
+                    .or_else(|| load_github_token(config))
                     .ok_or_else(|| {
                         YoloRouterError::ConfigError(
                             "Missing token/api_key for github_copilot provider".to_string(),
@@ -134,11 +136,28 @@ impl ProviderFactory {
     }
 }
 
+fn load_github_token(config: &ProviderConfig) -> Option<String> {
+    github_token_path(config)
+        .and_then(|path| std::fs::read_to_string(path).ok())
+        .map(|token| token.trim().to_string())
+        .filter(|token| !token.is_empty())
+}
+
+fn github_token_path(config: &ProviderConfig) -> Option<PathBuf> {
+    config
+        .extra
+        .get("token_path")
+        .and_then(|v| v.as_str())
+        .map(PathBuf::from)
+        .or_else(|| dirs::config_dir().map(|d| d.join("yolo-router").join("github_token")))
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
     use crate::config::schema::ProviderConfig;
     use std::collections::HashMap;
+    use std::time::{SystemTime, UNIX_EPOCH};
 
     #[test]
     fn test_create_anthropic_provider() {
@@ -166,5 +185,35 @@ mod tests {
         };
         let result = ProviderFactory::create_provider("openai", &config);
         assert!(result.is_err());
+    }
+
+    #[test]
+    fn test_create_github_provider_from_persisted_token_file() {
+        let suffix = SystemTime::now()
+            .duration_since(UNIX_EPOCH)
+            .unwrap()
+            .as_nanos();
+        let token_path = std::env::temp_dir().join(format!("yolo-router-github-token-{suffix}"));
+        std::fs::write(&token_path, "gho_test_token").unwrap();
+
+        let mut extra = HashMap::new();
+        extra.insert(
+            "token_path".to_string(),
+            toml::Value::String(token_path.display().to_string()),
+        );
+
+        let config = ProviderConfig {
+            provider_type: "github_copilot".to_string(),
+            api_key: None,
+            auth_type: None,
+            token: None,
+            base_url: None,
+            extra,
+        };
+
+        let provider = ProviderFactory::create_provider("github_copilot", &config).unwrap();
+        assert_eq!(provider.name(), "github_copilot");
+
+        let _ = std::fs::remove_file(token_path);
     }
 }
