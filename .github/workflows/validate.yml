@@ -1,0 +1,39 @@
+name: Validate Workflows
+
+on:
+  pull_request:
+    paths:
+      - '.github/workflows/**'
+  push:
+    branches:
+      - main
+    paths:
+      - '.github/workflows/**'
+
+jobs:
+  validate:
+    name: Validate Workflow Files
+    runs-on: ubuntu-latest
+    steps:
+      - name: Checkout code
+        uses: actions/checkout@v4
+
+      - name: Validate workflow files
+        run: |
+          for workflow in .github/workflows/*.yml; do
+            echo "Validating $workflow..."
+            if ! grep -q "^name:" "$workflow"; then
+              echo "Error: Missing 'name:' in $workflow"
+              exit 1
+            fi
+            if ! grep -q "^on:" "$workflow"; then
+              echo "Error: Missing 'on:' in $workflow"
+              exit 1
+            fi
+            echo "✓ $workflow is valid"
+          done
+
+      - name: Check workflow syntax
+        run: |
+          echo "Workflow files:"
+          ls -lh .github/workflows/

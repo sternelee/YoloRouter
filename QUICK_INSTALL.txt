@@ -1,0 +1,173 @@
+╔═════════════════════════════════════════════════════════════════════════════╗
+║                                                                             ║
+║                    YOLOPROUTER QUICK INSTALLATION                          ║
+║                                                                             ║
+║                         Get started in 5 minutes                           ║
+║                                                                             ║
+╚═════════════════════════════════════════════════════════════════════════════╝
+
+
+🚀 OPTION 1: ONE-COMMAND INSTALLATION (Recommended)
+═════════════════════════════════════════════════════════════════════════════
+
+From your terminal, run:
+
+    git clone https://github.com/sternelee/YoloRouter.git
+    cd YoloRouter
+    bash install.sh
+
+
+🚀 OPTION 2: CURL INSTALLATION (GitHub Raw)
+═════════════════════════════════════════════════════════════════════════════
+
+    curl -sSL https://raw.githubusercontent.com/sternelee/YoloRouter/main/install.sh | bash
+
+
+⚙️ AFTER INSTALLATION
+═════════════════════════════════════════════════════════════════════════════
+
+1. Set API Keys:
+   $ bash yolo-setup.sh env
+   
+   You'll be prompted to enter:
+   - Anthropic API Key (optional)
+   - OpenAI API Key (optional)
+   - Gemini API Key (optional)
+
+2. Start the Server:
+   $ bash yolo-setup.sh start
+   
+   Expected output:
+   ℹ Starting YoloRouter...
+   ℹ Server will run on http://127.0.0.1:8989
+
+3. Test the Server (in another terminal):
+   $ curl http://127.0.0.1:8989/health
+   
+   Expected response:
+   {"status":"ok"}
+
+4. Try an API Request:
+   $ curl -X POST http://127.0.0.1:8989/v1/auto \
+     -H "Content-Type: application/json" \
+     -d '{
+       "model": "claude-opus",
+       "messages": [{"role": "user", "content": "Hello!"}],
+       "max_tokens": 100
+     }'
+
+
+📝 SYSTEM REQUIREMENTS
+═════════════════════════════════════════════════════════════════════════════
+
+✓ macOS 10.12+, Linux, or Unix-like operating system
+✓ Git (for cloning)
+✓ Rust 1.70+ (cargo)
+✓ 256 MB RAM minimum
+✓ Internet connection
+✓ API keys from at least one provider:
+  - Anthropic: https://console.anthropic.com
+  - OpenAI: https://platform.openai.com
+  - Google Gemini: https://makersuite.google.com/app/apikey
+
+
+⚙️ HELPFUL COMMANDS
+═════════════════════════════════════════════════════════════════════════════
+
+Setup & Configuration:
+  bash yolo-setup.sh env       # Set API keys
+  bash yolo-setup.sh edit      # Edit configuration
+  bash yolo-setup.sh check     # Verify installation
+
+Running:
+  bash yolo-setup.sh start     # Start server
+  bash yolo-setup.sh test      # Test endpoints
+  bash yolo-setup.sh api       # Test with sample request
+  bash yolo-setup.sh logs      # View logs
+
+Uninstall:
+  bash uninstall.sh            # Remove YoloRouter
+
+
+🔍 VERIFICATION
+═════════════════════════════════════════════════════════════════════════════
+
+Check that everything is installed:
+
+  which yolo-router
+  # Should output: /usr/local/bin/yolo-router
+
+  yolo-router --version
+  # Should display version info
+
+  ls -la ~/.config/yolo-router/config.toml
+  # Should show your configuration file
+
+
+📋 COMMON ISSUES
+═════════════════════════════════════════════════════════════════════════════
+
+Problem: "Command not found: yolo-router"
+Solution: Ensure install.sh completed successfully, then restart your terminal
+
+Problem: "Port 8989 already in use"
+Solution: Edit ~/.config/yolo-router/config.toml and change the port number
+
+Problem: "API key not found"
+Solution: Run: bash yolo-setup.sh env
+         Then: export ANTHROPIC_API_KEY="your-key"
+
+Problem: "Build failed"
+Solution: Update Rust with: rustup update
+         Then: cd YoloRouter && bash install.sh
+
+
+📚 DOCUMENTATION
+═════════════════════════════════════════════════════════════════════════════
+
+For more information, see:
+
+  INSTALLATION.md  - Package index and reference
+  INSTALL.md       - Complete installation guide (11 troubleshooting tips)
+  README.md        - Project overview
+  USER_GUIDE.md    - Complete user guide
+  QUICK_START.md   - Quick reference
+
+
+🎯 WHAT'S NEXT
+═════════════════════════════════════════════════════════════════════════════
+
+1. Read USER_GUIDE.md for detailed usage
+2. Configure additional providers (OpenAI, Gemini, etc.)
+3. Set up scenarios for different use cases
+4. Integrate with your IDE or application
+
+
+💡 TIPS & TRICKS
+═════════════════════════════════════════════════════════════════════════════
+
+Make API Keys Persistent:
+  Add to ~/.bashrc, ~/.zshrc, or ~/.fish/config.fish:
+  
+  export ANTHROPIC_API_KEY="your-key"
+  export OPENAI_API_KEY="your-key"
+
+Autostart on Boot (Linux):
+  The installer offers to set up systemd service
+  Enable with: sudo systemctl enable yolo-router
+
+Autostart on Boot (macOS):
+  The installer offers to set up launchd service
+  Enable with: launchctl load ~/Library/LaunchAgents/com.yoloprouter.daemon.plist
+
+Monitor in Real-time:
+  watch -n 2 'curl -s http://127.0.0.1:8989/stats | jq .'
+
+
+═════════════════════════════════════════════════════════════════════════════
+
+That's it! YoloRouter is installed and ready to use.
+
+Questions? See INSTALL.md or visit GitHub Issues.
+
+═════════════════════════════════════════════════════════════════════════════
