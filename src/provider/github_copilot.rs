@@ -1,10 +1,10 @@
 // GitHub Copilot provider with OAuth device flow authentication
 // Supports the GitHub Copilot Chat API
 
-use crate::models::{ChatRequest, ChatResponse, Choice, ChatMessage, Usage};
+use super::Provider;
+use crate::models::{ChatMessage, ChatRequest, ChatResponse, Choice, Usage};
 use crate::Result;
 use async_trait::async_trait;
-use super::Provider;
 use reqwest::Client;
 use serde::{Deserialize, Serialize};
 use serde_json::{json, Value};
@@ -166,7 +166,8 @@ impl GitHubCopilotProvider {
         }
 
         // Fetch new copilot token
-        let resp = self.client
+        let resp = self
+            .client
             .get(GITHUB_COPILOT_TOKEN_URL)
             .header("Authorization", format!("token {}", self.github_token))
             .header("Accept", "application/json")
@@ -218,7 +219,8 @@ impl Provider for GitHubCopilotProvider {
             "stream": false
         });
 
-        let response = self.client
+        let response = self
+            .client
             .post(COPILOT_CHAT_URL)
             .header("Authorization", format!("Bearer {}", copilot_token))
             .header("Content-Type", "application/json")

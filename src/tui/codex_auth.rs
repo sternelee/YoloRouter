@@ -5,6 +5,7 @@
 //
 // The extra "Exchanging" state covers the code+verifier → access_token exchange.
 
+use crate::provider::CodexOAuthProvider;
 use crossterm::{
     event::{self, Event, KeyCode, KeyModifiers},
     execute,
@@ -22,7 +23,6 @@ use std::io;
 use std::path::PathBuf;
 use std::sync::{Arc, Mutex};
 use std::time::{Duration, Instant};
-use crate::provider::CodexOAuthProvider;
 
 // ─── State machine ────────────────────────────────────────────────────────────
 
@@ -45,7 +45,9 @@ pub enum CodexFlowState {
         access_token: String,
         refresh_token: Option<String>,
     },
-    Failed { reason: String },
+    Failed {
+        reason: String,
+    },
     Cancelled,
 }
 
@@ -102,7 +104,12 @@ async fn drive_codex_flow(state: Arc<Mutex<CodexFlowState>>, token_path: Option<
     let display = match provider.start_device_flow().await {
         Ok(d) => d,
         Err(e) => {
-            set_state(&state, CodexFlowState::Failed { reason: e.to_string() });
+            set_state(
+                &state,
+                CodexFlowState::Failed {
+                    reason: e.to_string(),
+                },
+            );
             return;
         }
     };
@@ -142,7 +149,12 @@ async fn drive_codex_flow(state: Arc<Mutex<CodexFlowState>>, token_path: Option<
             Ok(Some((code, verifier))) => break (code, verifier),
             Ok(None) => continue, // still pending
             Err(e) => {
-                set_state(&state, CodexFlowState::Failed { reason: e.to_string() });
+                set_state(
+                    &state,
+                    CodexFlowState::Failed {
+                        reason: e.to_string(),
+                    },
+                );
                 return;
             }
         }
@@ -162,7 +174,12 @@ async fn drive_codex_flow(state: Arc<Mutex<CodexFlowState>>, token_path: Option<
             );
         }
         Err(e) => {
-            set_state(&state, CodexFlowState::Failed { reason: e.to_string() });
+            set_state(
+                &state,
+                CodexFlowState::Failed {
+                    reason: e.to_string(),
+                },
+            );
         }
     }
 }
@@ -225,7 +242,10 @@ fn event_loop(
 
             let s = app.state.lock().unwrap();
             match &*s {
-                CodexFlowState::Success { access_token, refresh_token } => {
+                CodexFlowState::Success {
+                    access_token,
+                    refresh_token,
+                } => {
                     return Ok(Some((access_token.clone(), refresh_token.clone())));
                 }
                 CodexFlowState::Failed { .. } | CodexFlowState::Cancelled => {
@@ -327,7 +347,9 @@ fn draw_waiting(
         Line::from(""),
         Line::from(Span::styled(
             "  Step 1: Visit this URL in your browser",
-            Style::default().fg(Color::Cyan).add_modifier(Modifier::BOLD),
+            Style::default()
+                .fg(Color::Cyan)
+                .add_modifier(Modifier::BOLD),
         )),
         Line::from(""),
         Line::from(Span::styled(
@@ -339,7 +361,9 @@ fn draw_waiting(
         Line::from(""),
         Line::from(Span::styled(
             "  Step 2: Enter this one-time code",
-            Style::default().fg(Color::Cyan).add_modifier(Modifier::BOLD),
+            Style::default()
+                .fg(Color::Cyan)
+                .add_modifier(Modifier::BOLD),
         )),
         Line::from(""),
         Line::from(Span::styled(
@@ -369,8 +393,8 @@ fn draw_waiting(
         ]),
     ];
 
-    let para = Paragraph::new(lines)
-        .block(Block::default().borders(Borders::ALL).title(" Authorize "));
+    let para =
+        Paragraph::new(lines).block(Block::default().borders(Borders::ALL).title(" Authorize "));
     f.render_widget(para, inner[0]);
 
     let gauge = Gauge::default()

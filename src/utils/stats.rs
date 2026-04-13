@@ -1,7 +1,7 @@
-use std::sync::Arc;
-use tokio::sync::RwLock;
 use serde::{Deserialize, Serialize};
+use std::sync::Arc;
 use std::time::{SystemTime, UNIX_EPOCH};
+use tokio::sync::RwLock;
 
 #[derive(Debug, Clone, Serialize, Deserialize)]
 pub struct RequestStats {
@@ -135,7 +135,12 @@ mod tests {
     async fn test_record_request() {
         let collector = StatsCollector::new();
         collector
-            .record_request("anthropic".to_string(), "claude-opus".to_string(), true, 100)
+            .record_request(
+                "anthropic".to_string(),
+                "claude-opus".to_string(),
+                true,
+                100,
+            )
             .await;
 
         let stats = collector.get_stats().await;
@@ -148,7 +153,12 @@ mod tests {
     async fn test_record_multiple_requests() {
         let collector = StatsCollector::new();
         collector
-            .record_request("anthropic".to_string(), "claude-opus".to_string(), true, 100)
+            .record_request(
+                "anthropic".to_string(),
+                "claude-opus".to_string(),
+                true,
+                100,
+            )
             .await;
         collector
             .record_request("openai".to_string(), "gpt-4".to_string(), true, 150)

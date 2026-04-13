@@ -48,7 +48,7 @@ impl Config {
 
     pub fn daemon(&self) -> DaemonConfig {
         self.daemon.clone().unwrap_or(DaemonConfig {
-            port: 8080,
+            port: 8989,
             log_level: "info".to_string(),
         })
     }
@@ -181,7 +181,7 @@ mod tests {
     fn test_config_from_string() {
         let toml_str = r#"
 [daemon]
-port = 8080
+port = 8989
 log_level = "debug"
 
 [providers.anthropic]
@@ -189,7 +189,7 @@ type = "anthropic"
 api_key = "test-key"
 "#;
         let config = Config::from_string(toml_str).unwrap();
-        assert_eq!(config.daemon().port, 8080);
+        assert_eq!(config.daemon().port, 8989);
         assert_eq!(config.daemon().log_level, "debug");
         assert!(config.providers().contains_key("anthropic"));
     }
@@ -201,7 +201,7 @@ api_key = "test-key"
         }
         let toml_str = r#"
 [daemon]
-port = 8080
+port = 8989
 
 [providers.test]
 type = "test"
@@ -245,7 +245,7 @@ mod mutation_tests {
         Config::from_string(
             r#"
 [daemon]
-port = 8080
+port = 8989
 
 [providers.openai]
 type = "openai"

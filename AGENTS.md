@@ -35,6 +35,7 @@ cargo run -- --tui               # TUI mode (config editor)
 ## Architecture Essentials
 
 ### Module Structure
+
 ```
 src/
 ├── main.rs               # Daemon entry, --auth, --config, --tui flags
@@ -70,6 +71,7 @@ src/
 ```
 
 ### Request Flow
+
 1. HTTP request arrives at endpoint (e.g., `POST /v1/auto`)
 2. `FastAnalyzer` examines request (15 dimensions: complexity, cost, latency, accuracy, etc.)
 3. `RoutingEngine` selects best scenario + model list
@@ -80,9 +82,10 @@ src/
 ## Configuration
 
 ### config.toml Structure
+
 ```toml
 [daemon]
-port = 8080
+port = 8989
 log_level = "info"
 
 [providers.anthropic]
@@ -118,6 +121,7 @@ retry_count = 2
 **Test failure to fix**: `integration_tests.rs:48` — `ChatRequest` initializer missing `system` field. This was recently added to the schema. Update test data structures.
 
 **Unit tests** (30 passing):
+
 - `config::parser::tests` — TOML parsing, env expansion, validation
 - `provider::factory::tests` — Create providers, error handling
 - `utils::stats::tests` — Request tracking, aggregation
@@ -126,18 +130,19 @@ retry_count = 2
 - `tui::auth::tests` — Auth UI state machine
 
 **Integration test**:
+
 - `integration_tests.rs` — Full config round-trip, multi-provider scenarios
 
 ## Critical Code Locations
 
-| Task | File | Lines |
-|------|------|-------|
-| Add new provider | `src/provider/{name}.rs` + register in `factory.rs:create_provider()` | — |
-| Add HTTP endpoint | `src/server/mod.rs:start_server()` + handler | — |
-| Change config schema | `src/config/mod.rs` (structs), `parser.rs` (parsing), `config.example.toml` (docs) | — |
-| Fix build errors | Check `cargo test` output; integration test expects `system` field in `ChatRequest` | — |
-| Add test | Same file as code under `#[cfg(test)] mod tests` | — |
-| Debug logging | `utils::init_logger()` sets up tracing; use `info!`, `debug!`, `error!` macros | — |
+| Task                 | File                                                                                | Lines |
+| -------------------- | ----------------------------------------------------------------------------------- | ----- |
+| Add new provider     | `src/provider/{name}.rs` + register in `factory.rs:create_provider()`               | —     |
+| Add HTTP endpoint    | `src/server/mod.rs:start_server()` + handler                                        | —     |
+| Change config schema | `src/config/mod.rs` (structs), `parser.rs` (parsing), `config.example.toml` (docs)  | —     |
+| Fix build errors     | Check `cargo test` output; integration test expects `system` field in `ChatRequest` | —     |
+| Add test             | Same file as code under `#[cfg(test)] mod tests`                                    | —     |
+| Debug logging        | `utils::init_logger()` sets up tracing; use `info!`, `debug!`, `error!` macros      | —     |
 
 ## Build & Deployment Notes
 
@@ -145,7 +150,7 @@ retry_count = 2
 - **Executable location after build**: `target/release/yolo-router`
 - **Config loading order**: `--config` flag → `YOLO_CONFIG` env var → `config.toml` (current dir)
 - **Log level control**: `[daemon] log_level` in config or `RUST_LOG` env var (tracing-subscriber)
-- **Port binding**: Configured in `[daemon] port` (default 8080)
+- **Port binding**: Configured in `[daemon] port` (default 8989)
 
 ## Common Pitfalls
 
@@ -157,19 +162,20 @@ retry_count = 2
 
 ## Why Features Exist
 
-| Feature | Why | File |
-|---------|-----|------|
-| **15D FastAnalyzer** | Auto-select best model without hardcoding routes; saves ~40% cost vs static rules | `analyzer/multidimensional.rs` |
-| **Fallback chains** | Ensure reliability when a provider fails or quota exhausted | `router/fallback.rs` |
-| **Env var expansion** | Don't commit secrets; rely on deployment env | `config/parser.rs` |
-| **Scenario-based routing** | Different tasks (coding vs. general) benefit from different models/costs | `router/engine.rs` |
-| **TOML config** | Human-friendly, no code changes needed to retune models | `config/mod.rs` |
-| **TUI auth** | Interactive provider auth without editing config files | `tui/auth.rs` |
-| **Stats endpoint** | Monitor which providers are being called; detect issues | `utils/stats.rs` |
+| Feature                    | Why                                                                               | File                           |
+| -------------------------- | --------------------------------------------------------------------------------- | ------------------------------ |
+| **15D FastAnalyzer**       | Auto-select best model without hardcoding routes; saves ~40% cost vs static rules | `analyzer/multidimensional.rs` |
+| **Fallback chains**        | Ensure reliability when a provider fails or quota exhausted                       | `router/fallback.rs`           |
+| **Env var expansion**      | Don't commit secrets; rely on deployment env                                      | `config/parser.rs`             |
+| **Scenario-based routing** | Different tasks (coding vs. general) benefit from different models/costs          | `router/engine.rs`             |
+| **TOML config**            | Human-friendly, no code changes needed to retune models                           | `config/mod.rs`                |
+| **TUI auth**               | Interactive provider auth without editing config files                            | `tui/auth.rs`                  |
+| **Stats endpoint**         | Monitor which providers are being called; detect issues                           | `utils/stats.rs`               |
 
 ## Extending the System
 
 ### Add a New Provider
+
 1. Create `src/provider/{name}.rs` with `impl Provider` (trait requires `send_request()`)
 2. Add creation logic to `src/provider/factory.rs:create_provider()` match statement
 3. Add config struct to `src/config/mod.rs:ProviderConfig`
@@ -177,6 +183,7 @@ retry_count = 2
 5. Write unit test in the provider file
 
 ### Add a New HTTP Endpoint
+
 1. Add route in `src/server/mod.rs:start_server()` using `web::post()`
 2. Create async handler function in same file or `src/server/handlers.rs`
 3. Handler receives `AppState` (contains `router`, `stats`, `config`)
@@ -184,6 +191,7 @@ retry_count = 2
 5. Write integration test in `tests/integration_tests.rs`
 
 ### Modify Config Schema
+
 1. Update struct in `src/config/mod.rs`
 2. Update parsing logic in `src/config/parser.rs` if needed (Serde usually handles it)
 3. Update `config.example.toml` and `config.toml` examples
@@ -200,15 +208,15 @@ retry_count = 2
 
 ## Dependencies to Know
 
-| Crate | Purpose | Version |
-|-------|---------|---------|
-| `actix-web` | HTTP server framework | 4.4 |
-| `tokio` | Async runtime | 1.35 |
-| `serde` + `toml` | Config serialization | 1.0 |
-| `reqwest` | HTTP client (for provider calls) | 0.11 |
-| `ratatui` | Terminal UI rendering | 0.26 |
-| `tracing` | Structured logging | 0.1 |
-| `thiserror` | Error definitions | 1.0 |
+| Crate            | Purpose                          | Version |
+| ---------------- | -------------------------------- | ------- |
+| `actix-web`      | HTTP server framework            | 4.4     |
+| `tokio`          | Async runtime                    | 1.35    |
+| `serde` + `toml` | Config serialization             | 1.0     |
+| `reqwest`        | HTTP client (for provider calls) | 0.11    |
+| `ratatui`        | Terminal UI rendering            | 0.26    |
+| `tracing`        | Structured logging               | 0.1     |
+| `thiserror`      | Error definitions                | 1.0     |
 
 ## Documentation Pointers
 

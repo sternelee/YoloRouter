@@ -1,9 +1,9 @@
+use crate::config::Config;
 use crate::models::{ChatRequest, ChatResponse};
 use crate::provider::{Provider, ProviderFactory};
-use crate::config::Config;
 use crate::Result;
-use std::sync::Arc;
 use std::collections::HashMap;
+use std::sync::Arc;
 use tokio::sync::RwLock;
 
 pub mod engine;
@@ -22,7 +22,11 @@ impl Router {
         }
     }
 
-    pub async fn route(&self, request: &ChatRequest, scenario: Option<&str>) -> Result<ChatResponse> {
+    pub async fn route(
+        &self,
+        request: &ChatRequest,
+        scenario: Option<&str>,
+    ) -> Result<ChatResponse> {
         let engine = self.engine.read().await;
         engine.route(request, scenario).await
     }
@@ -96,7 +100,9 @@ models = [
 
     #[tokio::test]
     async fn test_router_reload_updates_provider_registry() {
-        let router = Router::new(RoutingEngine::new_with_config(config_with_provider("openai", "openai")).unwrap());
+        let router = Router::new(
+            RoutingEngine::new_with_config(config_with_provider("openai", "openai")).unwrap(),
+        );
 
         assert_eq!(router.provider_names().await, vec!["openai".to_string()]);
 

@@ -1,12 +1,12 @@
 #[cfg(test)]
 mod integration_tests {
-    use yolo_router::{Config, ChatRequest, ChatMessage};
+    use yolo_router::{ChatMessage, ChatRequest, Config};
 
     #[test]
     fn test_config_round_trip() {
         let toml_str = r#"
 [daemon]
-port = 8080
+port = 8989
 log_level = "info"
 
 [providers.anthropic]
@@ -30,16 +30,14 @@ timeout_ms = 30000
 retry_count = 2
 "#;
 
-        let config = Config::from_string(toml_str)
-            .expect("Failed to parse config");
-        
-        assert_eq!(config.daemon().port, 8080);
+        let config = Config::from_string(toml_str).expect("Failed to parse config");
+
+        assert_eq!(config.daemon().port, 8989);
         assert!(config.providers().contains_key("anthropic"));
         assert!(config.providers().contains_key("openai"));
         assert!(config.scenarios().contains_key("coding"));
-        
-        let config_str = config.to_string()
-            .expect("Failed to serialize config");
+
+        let config_str = config.to_string().expect("Failed to serialize config");
         assert!(!config_str.is_empty());
     }
 
@@ -47,12 +45,10 @@ retry_count = 2
     fn test_chat_request_creation() {
         let request = ChatRequest {
             model: "claude-opus".to_string(),
-            messages: vec![
-                ChatMessage {
-                    role: "user".to_string(),
-                    content: "Hello!".to_string(),
-                }
-            ],
+            messages: vec![ChatMessage {
+                role: "user".to_string(),
+                content: "Hello!".to_string(),
+            }],
             max_tokens: Some(1000),
             temperature: Some(0.7),
             top_p: None,
@@ -69,7 +65,7 @@ retry_count = 2
     fn test_multi_provider_config() {
         let toml_str = r#"
 [daemon]
-port = 8080
+port = 8989
 
 [providers.anthropic]
 type = "anthropic"
@@ -99,9 +95,8 @@ models = [
 fallback_enabled = true
 "#;
 
-        let config = Config::from_string(toml_str)
-            .expect("Failed to parse multi-provider config");
-        
+        let config = Config::from_string(toml_str).expect("Failed to parse multi-provider config");
+
         assert_eq!(config.providers().len(), 4);
         assert!(config.providers().contains_key("anthropic"));
         assert!(config.providers().contains_key("openai"));
@@ -113,7 +108,7 @@ fallback_enabled = true
     fn test_scenario_validation() {
         let toml_str = r#"
 [daemon]
-port = 8080
+port = 8989
 
 [providers.anthropic]
 type = "anthropic"
@@ -129,9 +124,8 @@ models = [
 fallback_enabled = true
 "#;
 
-        let config = Config::from_string(toml_str)
-            .expect("Failed to parse config");
-        
+        let config = Config::from_string(toml_str).expect("Failed to parse config");
+
         // Validation should fail because 'nonexistent' provider doesn't exist
         let result = config.validate();
         assert!(result.is_err(), "Should detect missing provider");
@@ -141,7 +135,7 @@ fallback_enabled = true
     fn test_routing_config_defaults() {
         let toml_str = r#"
 [daemon]
-port = 8080
+port = 8989
 
 [providers.anthropic]
 type = "anthropic"
@@ -151,9 +145,8 @@ api_key = "sk-test"
 fallback_enabled = true
 "#;
 
-        let config = Config::from_string(toml_str)
-            .expect("Failed to parse config");
-        
+        let config = Config::from_string(toml_str).expect("Failed to parse config");
+
         let routing = config.routing();
         assert_eq!(routing.fallback_enabled, true);
         assert_eq!(routing.timeout_ms, 30000);
@@ -165,7 +158,7 @@ fallback_enabled = true
     fn test_daemon_config_validation() {
         let toml_str = r#"
 [daemon]
-port = 8080
+port = 8989
 log_level = "debug"
 
 [providers.anthropic]
@@ -176,11 +169,10 @@ api_key = "sk-test"
 fallback_enabled = true
 "#;
 
-        let config = Config::from_string(toml_str)
-            .expect("Failed to parse config");
-        
+        let config = Config::from_string(toml_str).expect("Failed to parse config");
+
         let daemon = config.daemon();
-        assert_eq!(daemon.port, 8080);
+        assert_eq!(daemon.port, 8989);
         assert_eq!(daemon.log_level, "debug");
     }
 
@@ -188,7 +180,7 @@ fallback_enabled = true
     fn test_complex_scenario_chain() {
         let toml_str = r#"
 [daemon]
-port = 8080
+port = 8989
 
 [providers.anthropic]
 type = "anthropic"
@@ -225,18 +217,19 @@ timeout_ms = 60000
 retry_count = 3
 "#;
 
-        let config = Config::from_string(toml_str)
-            .expect("Failed to parse config");
-        
+        let config = Config::from_string(toml_str).expect("Failed to parse config");
+
         assert!(config.validate().is_ok());
         assert_eq!(config.scenarios().len(), 2);
-        
+
         let scenarios = config.scenarios();
-        let prod_scenario = scenarios.get("production_coding")
+        let prod_scenario = scenarios
+            .get("production_coding")
             .expect("Missing production_coding scenario");
         assert_eq!(prod_scenario.models.len(), 5);
-        
-        let budget_scenario = scenarios.get("budget_mode")
+
+        let budget_scenario = scenarios
+            .get("budget_mode")
             .expect("Missing budget_mode scenario");
         assert_eq!(budget_scenario.models.len(), 2);
     }

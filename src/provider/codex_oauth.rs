@@ -12,10 +12,10 @@
 //      → {access_token, refresh_token?, expires_in?}
 //   5. Refresh: POST same URL with grant_type=refresh_token, refresh_token, client_id, scope
 
-use crate::models::{ChatRequest, ChatResponse, Choice, ChatMessage, Usage};
+use super::Provider;
+use crate::models::{ChatMessage, ChatRequest, ChatResponse, Choice, Usage};
 use crate::Result;
 use async_trait::async_trait;
-use super::Provider;
 use reqwest::Client;
 use serde::{Deserialize, Serialize};
 use serde_json::{json, Value};
@@ -29,10 +29,8 @@ use tokio::sync::RwLock;
 /// OpenAI OAuth client ID (same as used by OpenCode / official Codex CLI)
 pub const CODEX_CLIENT_ID: &str = "app_EMoamEEZ73f0CkXaXp7hrann";
 
-const DEVICE_AUTH_USERCODE_URL: &str =
-    "https://auth.openai.com/api/accounts/deviceauth/usercode";
-const DEVICE_AUTH_TOKEN_URL: &str =
-    "https://auth.openai.com/api/accounts/deviceauth/token";
+const DEVICE_AUTH_USERCODE_URL: &str = "https://auth.openai.com/api/accounts/deviceauth/usercode";
+const DEVICE_AUTH_TOKEN_URL: &str = "https://auth.openai.com/api/accounts/deviceauth/token";
 const OAUTH_TOKEN_URL: &str = "https://auth.openai.com/oauth/token";
 const DEVICE_REDIRECT_URI: &str = "https://auth.openai.com/deviceauth/callback";
 
@@ -252,11 +250,7 @@ impl CodexOAuthProvider {
 
     /// Step 4: exchange authorization_code + code_verifier for tokens.
     /// Automatically persists to `token_path` if set.
-    pub async fn exchange_code(
-        &self,
-        code: &str,
-        code_verifier: &str,
-    ) -> Result<CodexTokenState> {
+    pub async fn exchange_code(&self, code: &str, code_verifier: &str) -> Result<CodexTokenState> {
         let resp = self
             .client
             .post(OAUTH_TOKEN_URL)
@@ -302,8 +296,7 @@ impl CodexOAuthProvider {
             let s = self.token_state.read().await;
             s.refresh_token.clone().ok_or_else(|| {
                 crate::error::YoloRouterError::RequestError(
-                    "No Codex refresh token. Re-authenticate: yolo-router --auth codex"
-                        .to_string(),
+                    "No Codex refresh token. Re-authenticate: yolo-router --auth codex".to_string(),
                 )
             })?
         };
@@ -365,8 +358,7 @@ impl CodexOAuthProvider {
                 // About to expire; fall through to refresh
             } else if s.access_token.is_none() {
                 return Err(crate::error::YoloRouterError::RequestError(
-                    "No Codex OAuth token. Authenticate with: yolo-router --auth codex"
-                        .to_string(),
+                    "No Codex OAuth token. Authenticate with: yolo-router --auth codex".to_string(),
                 ));
             }
         }

@@ -1,7 +1,7 @@
-use crate::models::{ChatRequest, ChatResponse, Choice, ChatMessage, Usage};
+use super::Provider;
+use crate::models::{ChatMessage, ChatRequest, ChatResponse, Choice, Usage};
 use crate::Result;
 use async_trait::async_trait;
-use super::Provider;
 use reqwest::Client;
 use serde_json::Value;
 
@@ -30,7 +30,7 @@ impl GenericProvider {
 impl Provider for GenericProvider {
     async fn send_request(&self, request: &ChatRequest) -> Result<ChatResponse> {
         let url = format!("{}/chat/completions", self.base_url);
-        
+
         let payload = serde_json::json!({
             "model": request.model,
             "messages": request.messages,
@@ -38,7 +38,8 @@ impl Provider for GenericProvider {
             "max_tokens": request.max_tokens.unwrap_or(2048),
         });
 
-        let response = self.client
+        let response = self
+            .client
             .post(&url)
             .header("Authorization", format!("Bearer {}", self.api_key))
             .json(&payload)
@@ -47,12 +48,16 @@ impl Provider for GenericProvider {
             .map_err(|e| crate::error::YoloRouterError::HttpError(e))?;
 
         if !response.status().is_success() {
-            return Err(crate::error::YoloRouterError::RequestError(
-                format!("{} API error: {}", self.name, response.status())
-            ));
+            return Err(crate::error::YoloRouterError::RequestError(format!(
+                "{} API error: {}",
+                self.name,
+                response.status()
+            )));
         }
 
-        let data: Value = response.json().await
+        let data: Value = response
+            .json()
+            .await
             .map_err(|e| crate::error::YoloRouterError::HttpError(e))?;
 
         let content = data["choices"][0]["message"]["content"]

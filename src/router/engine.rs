@@ -1,8 +1,8 @@
-use crate::models::{ChatRequest, ChatResponse};
+use super::{FallbackChain, ProviderRegistry};
+use crate::analyzer::{match_scenario, FastAnalyzer, ModelCandidate};
 use crate::config::Config;
+use crate::models::{ChatRequest, ChatResponse};
 use crate::Result;
-use crate::analyzer::{FastAnalyzer, ModelCandidate, match_scenario};
-use super::{ProviderRegistry, FallbackChain};
 use std::sync::Arc;
 use std::time::Duration;
 use tokio::sync::RwLock;
@@ -43,7 +43,11 @@ impl RoutingEngine {
         })
     }
 
-    pub async fn route(&self, request: &ChatRequest, scenario: Option<&str>) -> Result<ChatResponse> {
+    pub async fn route(
+        &self,
+        request: &ChatRequest,
+        scenario: Option<&str>,
+    ) -> Result<ChatResponse> {
         let config = self.config.read().await;
         let routing_config = config.routing();
         let timeout_duration = Duration::from_millis(routing_config.timeout_ms);
@@ -58,60 +62,52 @@ impl RoutingEngine {
         // Auto-routing via analyzer — used ONLY by /v1/auto endpoint
         let scenarios = config.scenarios();
         if !scenarios.is_empty() {
-                let candidates: Vec<ModelCandidate> = scenarios
-                    .values()
-                    .flat_map(|sc| {
-                        sc.models.iter().map(|m| ModelCandidate {
-                            id: format!("{}/{}", m.provider, m.model),
-                            provider: m.provider.clone(),
-                            model: m.model.clone(),
-                            capabilities: m.capabilities.clone().unwrap_or_default(),
-                            cost_tier: m
-                                .cost_tier
-                                .clone()
-                                .unwrap_or_else(|| "medium".to_string()),
-                        })
+            let candidates: Vec<ModelCandidate> = scenarios
+                .values()
+                .flat_map(|sc| {
+                    sc.models.iter().map(|m| ModelCandidate {
+                        id: format!("{}/{}", m.provider, m.model),
+                        provider: m.provider.clone(),
+                        model: m.model.clone(),
+                        capabilities: m.capabilities.clone().unwrap_or_default(),
+                        cost_tier: m.cost_tier.clone().unwrap_or_else(|| "medium".to_string()),
                     })
-                    .collect();
+                })
+                .collect();
 
-                let (analysis, _scores) =
-                    self.analyzer.analyze_and_score(&request.messages, &candidates);
+            let (analysis, _scores) = self
+                .analyzer
+                .analyze_and_score(&request.messages, &candidates);
 
-                let scenario_data: Vec<(
-                    &str,
-                    &[String],
-                    &[String],
-                    i32,
-                    bool,
-                )> = scenarios
-                    .iter()
-                    .map(|(name, sc)| {
-                        (
-                            name.as_str(),
-                            sc.match_task_types.as_slice(),
-                            sc.match_languages.as_slice(),
-                            sc.priority,
-                            sc.is_default,
-                        )
-                    })
-                    .collect();
+            let scenario_data: Vec<(&str, &[String], &[String], i32, bool)> = scenarios
+                .iter()
+                .map(|(name, sc)| {
+                    (
+                        name.as_str(),
+                        sc.match_task_types.as_slice(),
+                        sc.match_languages.as_slice(),
+                        sc.priority,
+                        sc.is_default,
+                    )
+                })
+                .collect();
 
-                tracing::debug!(
-                    task_type = analysis.features.task_type.as_str(),
-                    language = analysis.features.language.as_str(),
-                    confidence = analysis.features.confidence,
-                    "Analyzer result for auto-routing"
-                );
+            tracing::debug!(
+                task_type = analysis.features.task_type.as_str(),
+                language = analysis.features.language.as_str(),
+                confidence = analysis.features.confidence,
+                "Analyzer result for auto-routing"
+            );
 
-                if let Some(scenario_name) = match_scenario(
-                    &analysis,
-                    &scenario_data,
-                    routing_config.confidence_threshold,
-                ) {
-                    return self
-                        .route_via_scenario(request, &scenario_name, &config, timeout_duration)
-                        .await;
-                }
+            if let Some(scenario_name) = match_scenario(
+                &analysis,
+                &scenario_data,
+                routing_config.confidence_threshold,
+            ) {
+                return self
+                    .route_via_scenario(request, &scenario_name, &config, timeout_duration)
+                    .await;
+            }
         }
 
         // Direct routing: "provider:model" format

@@ -1,9 +1,9 @@
 // 15 维度请求分析和模型评分系统
 // 支持多语言检测、任务类型识别和智能场景匹配
 
-use std::collections::HashMap;
-use serde::{Deserialize, Serialize};
 use crate::models::ChatMessage;
+use serde::{Deserialize, Serialize};
+use std::collections::HashMap;
 
 // ─── Public Types ─────────────────────────────────────────────────────────────
 
@@ -157,7 +157,11 @@ impl FastAnalyzer {
         let estimated_tokens = (content.len() / 4).max(1);
         let language = detect_language(&content);
         let (task_type, task_confidence) = detect_task_type(&content, &language);
-        let lang_confidence = if matches!(language, Language::Mixed) { 0.6 } else { 0.9 };
+        let lang_confidence = if matches!(language, Language::Mixed) {
+            0.6
+        } else {
+            0.9
+        };
         let confidence = (task_confidence * lang_confidence).clamp(0.0, 1.0);
 
         let requires_vision = messages
@@ -223,8 +227,7 @@ impl FastAnalyzer {
             .model_costs
             .get(&c.id)
             .map(|mc| {
-                (a.features.estimated_tokens as f32 / 1_000_000.0)
-                    * mc.input_price_per_1m_tokens
+                (a.features.estimated_tokens as f32 / 1_000_000.0) * mc.input_price_per_1m_tokens
                     + (500.0 / 1_000_000.0) * mc.output_price_per_1m_tokens
             })
             .unwrap_or_default();
@@ -309,43 +312,63 @@ impl FastAnalyzer {
         let mut m: HashMap<String, [f32; 15]> = HashMap::new();
         m.insert(
             "anthropic/claude-opus-4-5".to_string(),
-            [95., 20., 70., 97., 40., 20., 92., 80., 85., 90., 90., 95., 95., 88., 95.],
+            [
+                95., 20., 70., 97., 40., 20., 92., 80., 85., 90., 90., 95., 95., 88., 95.,
+            ],
         );
         m.insert(
             "anthropic/claude-sonnet-4-5".to_string(),
-            [85., 55., 82., 90., 65., 55., 90., 78., 85., 85., 85., 90., 88., 85., 88.],
+            [
+                85., 55., 82., 90., 65., 55., 90., 78., 85., 85., 85., 90., 88., 85., 88.,
+            ],
         );
         m.insert(
             "anthropic/claude-haiku-4-5".to_string(),
-            [65., 85., 95., 75., 90., 85., 90., 72., 80., 80., 75., 82., 72., 75., 80.],
+            [
+                65., 85., 95., 75., 90., 85., 90., 72., 80., 80., 75., 82., 72., 75., 80.,
+            ],
         );
         m.insert(
             "openai/gpt-4o".to_string(),
-            [90., 45., 80., 92., 60., 45., 90., 82., 85., 82., 92., 90., 90., 93., 90.],
+            [
+                90., 45., 80., 92., 60., 45., 90., 82., 85., 82., 92., 90., 90., 93., 90.,
+            ],
         );
         m.insert(
             "openai/gpt-4o-mini".to_string(),
-            [72., 82., 92., 78., 88., 82., 88., 75., 80., 75., 80., 80., 75., 80., 82.],
+            [
+                72., 82., 92., 78., 88., 82., 88., 75., 80., 75., 80., 80., 75., 80., 82.,
+            ],
         );
         m.insert(
             "openai/gpt-3.5-turbo".to_string(),
-            [62., 90., 97., 68., 95., 90., 85., 72., 78., 70., 72., 72., 62., 72., 75.],
+            [
+                62., 90., 97., 68., 95., 90., 85., 72., 78., 70., 72., 72., 62., 72., 75.,
+            ],
         );
         m.insert(
             "openai/o1-preview".to_string(),
-            [95., 15., 50., 98., 25., 15., 88., 70., 80., 85., 80., 90., 98., 88., 90.],
+            [
+                95., 15., 50., 98., 25., 15., 88., 70., 80., 85., 80., 90., 98., 88., 90.,
+            ],
         );
         m.insert(
             "google/gemini-2.0-flash".to_string(),
-            [78., 75., 90., 82., 85., 75., 82., 72., 80., 72., 88., 85., 78., 78., 85.],
+            [
+                78., 75., 90., 82., 85., 75., 82., 72., 80., 72., 88., 85., 78., 78., 85.,
+            ],
         );
         m.insert(
             "google/gemini-1.5-pro".to_string(),
-            [85., 50., 78., 88., 65., 50., 85., 75., 82., 78., 90., 88., 85., 80., 88.],
+            [
+                85., 50., 78., 88., 65., 50., 85., 75., 82., 78., 90., 88., 85., 80., 88.,
+            ],
         );
         m.insert(
             "github_copilot/gpt-4o".to_string(),
-            [88., 70., 82., 90., 65., 70., 85., 78., 80., 75., 88., 85., 88., 92., 88.],
+            [
+                88., 70., 82., 90., 65., 70., 85., 78., 80., 75., 88., 85., 88., 92., 88.,
+            ],
         );
         m
     }
@@ -354,43 +377,73 @@ impl FastAnalyzer {
         let mut c: HashMap<String, ModelCost> = HashMap::new();
         c.insert(
             "anthropic/claude-opus-4-5".to_string(),
-            ModelCost { input_price_per_1m_tokens: 3.0, output_price_per_1m_tokens: 15.0 },
+            ModelCost {
+                input_price_per_1m_tokens: 3.0,
+                output_price_per_1m_tokens: 15.0,
+            },
         );
         c.insert(
             "anthropic/claude-sonnet-4-5".to_string(),
-            ModelCost { input_price_per_1m_tokens: 1.0, output_price_per_1m_tokens: 5.0 },
+            ModelCost {
+                input_price_per_1m_tokens: 1.0,
+                output_price_per_1m_tokens: 5.0,
+            },
         );
         c.insert(
             "anthropic/claude-haiku-4-5".to_string(),
-            ModelCost { input_price_per_1m_tokens: 0.25, output_price_per_1m_tokens: 1.25 },
+            ModelCost {
+                input_price_per_1m_tokens: 0.25,
+                output_price_per_1m_tokens: 1.25,
+            },
         );
         c.insert(
             "openai/gpt-4o".to_string(),
-            ModelCost { input_price_per_1m_tokens: 2.5, output_price_per_1m_tokens: 10.0 },
+            ModelCost {
+                input_price_per_1m_tokens: 2.5,
+                output_price_per_1m_tokens: 10.0,
+            },
         );
         c.insert(
             "openai/gpt-4o-mini".to_string(),
-            ModelCost { input_price_per_1m_tokens: 0.15, output_price_per_1m_tokens: 0.6 },
+            ModelCost {
+                input_price_per_1m_tokens: 0.15,
+                output_price_per_1m_tokens: 0.6,
+            },
         );
         c.insert(
             "openai/gpt-3.5-turbo".to_string(),
-            ModelCost { input_price_per_1m_tokens: 0.5, output_price_per_1m_tokens: 1.5 },
+            ModelCost {
+                input_price_per_1m_tokens: 0.5,
+                output_price_per_1m_tokens: 1.5,
+            },
         );
         c.insert(
             "openai/o1-preview".to_string(),
-            ModelCost { input_price_per_1m_tokens: 15.0, output_price_per_1m_tokens: 60.0 },
+            ModelCost {
+                input_price_per_1m_tokens: 15.0,
+                output_price_per_1m_tokens: 60.0,
+            },
         );
         c.insert(
             "google/gemini-2.0-flash".to_string(),
-            ModelCost { input_price_per_1m_tokens: 0.1, output_price_per_1m_tokens: 0.4 },
+            ModelCost {
+                input_price_per_1m_tokens: 0.1,
+                output_price_per_1m_tokens: 0.4,
+            },
         );
         c.insert(
             "google/gemini-1.5-pro".to_string(),
-            ModelCost { input_price_per_1m_tokens: 1.25, output_price_per_1m_tokens: 5.0 },
+            ModelCost {
+                input_price_per_1m_tokens: 1.25,
+                output_price_per_1m_tokens: 5.0,
+            },
         );
         c.insert(
             "github_copilot/gpt-4o".to_string(),
-            ModelCost { input_price_per_1m_tokens: 0.0, output_price_per_1m_tokens: 0.0 },
+            ModelCost {
+                input_price_per_1m_tokens: 0.0,
+                output_price_per_1m_tokens: 0.0,
+            },
         );
         c
     }
@@ -430,10 +483,30 @@ fn detect_language(text: &str) -> Language {
     }
 
     let code_patterns = [
-        "def ", "fn ", "func ", "function ", "class ", "struct ",
-        "import ", "use ", "require(", "include ", "package ",
-        "if (", "if(", "for (", "for(", "while(", "while (",
-        "=>", "->", "::", "===", "!==", "&&", "||",
+        "def ",
+        "fn ",
+        "func ",
+        "function ",
+        "class ",
+        "struct ",
+        "import ",
+        "use ",
+        "require(",
+        "include ",
+        "package ",
+        "if (",
+        "if(",
+        "for (",
+        "for(",
+        "while(",
+        "while (",
+        "=>",
+        "->",
+        "::",
+        "===",
+        "!==",
+        "&&",
+        "||",
     ];
     for pattern in &code_patterns {
         if text.contains(pattern) {
@@ -445,8 +518,7 @@ fn detect_language(text: &str) -> Language {
     let structural_ratio = structural_chars as f32 / total_chars as f32;
     // High keyword density OR at least one keyword + structural punctuation
     let is_code = cjk_ratio < 0.15
-        && (code_indicators >= 2
-            || (code_indicators >= 1 && structural_ratio > 0.04));
+        && (code_indicators >= 2 || (code_indicators >= 1 && structural_ratio > 0.04));
 
     if is_code {
         Language::Code
@@ -469,37 +541,108 @@ fn detect_task_type(text: &str, lang: &Language) -> (TaskType, f32) {
     let lower = text.to_lowercase();
 
     let coding_en = [
-        "write code", "implement", "debug", "function", "algorithm",
-        "refactor", "unit test", "class ", "variable", "compile", "syntax",
-        "code review", "program", "script", "regex", "sql", "api endpoint",
-        "dockerfile", "kubernetes", "git ", "bash ", "shell ",
+        "write code",
+        "implement",
+        "debug",
+        "function",
+        "algorithm",
+        "refactor",
+        "unit test",
+        "class ",
+        "variable",
+        "compile",
+        "syntax",
+        "code review",
+        "program",
+        "script",
+        "regex",
+        "sql",
+        "api endpoint",
+        "dockerfile",
+        "kubernetes",
+        "git ",
+        "bash ",
+        "shell ",
     ];
     let coding_zh = [
-        "写代码", "实现", "调试", "函数", "算法", "重构",
-        "单元测试", "类", "变量", "编程", "脚本", "代码审查", "接口",
+        "写代码",
+        "实现",
+        "调试",
+        "函数",
+        "算法",
+        "重构",
+        "单元测试",
+        "类",
+        "变量",
+        "编程",
+        "脚本",
+        "代码审查",
+        "接口",
     ];
     let reasoning_en = [
-        "why ", "analyze", "explain", "compare", "evaluate",
-        "pros and cons", "trade-off", "because", "therefore", "step by step",
-        "reason", "logic", "prove", "hypothesis", "conclusion",
+        "why ",
+        "analyze",
+        "explain",
+        "compare",
+        "evaluate",
+        "pros and cons",
+        "trade-off",
+        "because",
+        "therefore",
+        "step by step",
+        "reason",
+        "logic",
+        "prove",
+        "hypothesis",
+        "conclusion",
     ];
     let reasoning_zh = [
-        "为什么", "分析", "解释", "比较", "评估",
-        "优缺点", "权衡", "因为", "所以", "一步一步", "推理", "证明",
+        "为什么",
+        "分析",
+        "解释",
+        "比较",
+        "评估",
+        "优缺点",
+        "权衡",
+        "因为",
+        "所以",
+        "一步一步",
+        "推理",
+        "证明",
     ];
     let translation_en = [
-        "translate", "translation", "into english", "into chinese",
-        "into french", "into japanese", "into korean",
+        "translate",
+        "translation",
+        "into english",
+        "into chinese",
+        "into french",
+        "into japanese",
+        "into korean",
     ];
     let translation_zh = ["翻译", "译成", "转换成", "中文翻译", "英文翻译"];
     let creative_en = [
-        "write a story", "poem", "essay", "creative", "fiction",
-        "narrative", "blog post", "article", "script",
+        "write a story",
+        "poem",
+        "essay",
+        "creative",
+        "fiction",
+        "narrative",
+        "blog post",
+        "article",
+        "script",
     ];
     let creative_zh = ["写故事", "写诗", "创意", "小说", "散文", "文章"];
     let analysis_en = [
-        "data analysis", "statistics", "chart", "graph", "dataset",
-        "correlation", "regression", "visualize", "insights", "trends",
+        "data analysis",
+        "statistics",
+        "chart",
+        "graph",
+        "dataset",
+        "correlation",
+        "regression",
+        "visualize",
+        "insights",
+        "trends",
     ];
     let analysis_zh = ["数据分析", "统计", "图表", "数据集", "可视化", "趋势"];
 
@@ -511,20 +654,40 @@ fn detect_task_type(text: &str, lang: &Language) -> (TaskType, f32) {
     let has_cjk = matches!(lang, Language::Cjk | Language::Mixed);
 
     let coding_score = count_hits(&lower, &coding_en)
-        + if has_cjk { count_hits(&lower, &coding_zh) * 1.5 } else { 0.0 }
+        + if has_cjk {
+            count_hits(&lower, &coding_zh) * 1.5
+        } else {
+            0.0
+        }
         + if is_code_lang { 5.0 } else { 0.0 };
 
     let reasoning_score = count_hits(&lower, &reasoning_en)
-        + if has_cjk { count_hits(&lower, &reasoning_zh) * 1.5 } else { 0.0 };
+        + if has_cjk {
+            count_hits(&lower, &reasoning_zh) * 1.5
+        } else {
+            0.0
+        };
 
     let translation_score = count_hits(&lower, &translation_en)
-        + if has_cjk { count_hits(&lower, &translation_zh) * 1.5 } else { 0.0 };
+        + if has_cjk {
+            count_hits(&lower, &translation_zh) * 1.5
+        } else {
+            0.0
+        };
 
     let creative_score = count_hits(&lower, &creative_en)
-        + if has_cjk { count_hits(&lower, &creative_zh) * 1.5 } else { 0.0 };
+        + if has_cjk {
+            count_hits(&lower, &creative_zh) * 1.5
+        } else {
+            0.0
+        };
 
     let analysis_score = count_hits(&lower, &analysis_en)
-        + if has_cjk { count_hits(&lower, &analysis_zh) * 1.5 } else { 0.0 };
+        + if has_cjk {
+            count_hits(&lower, &analysis_zh) * 1.5
+        } else {
+            0.0
+        };
 
     let scores = [
         ("coding", coding_score),
@@ -615,10 +778,9 @@ pub fn match_scenario(
 
     let mut best: Option<(&str, i32)> = None;
     for (name, task_types, languages, priority, _is_default) in scenario_metadata {
-        let task_match = task_types.is_empty()
-            || task_types.iter().any(|t| t == task_str);
-        let lang_match = languages.is_empty()
-            || languages.iter().any(|l| l == lang_str || l == "mixed");
+        let task_match = task_types.is_empty() || task_types.iter().any(|t| t == task_str);
+        let lang_match =
+            languages.is_empty() || languages.iter().any(|l| l == lang_str || l == "mixed");
 
         if task_match && lang_match {
             if best.is_none() || *priority > best.unwrap().1 {
@@ -668,10 +830,15 @@ mod tests {
 
     #[test]
     fn test_task_detection_coding() {
-        let (task, conf) =
-            detect_task_type("write code to implement a binary search algorithm", &Language::Latin);
+        let (task, conf) = detect_task_type(
+            "write code to implement a binary search algorithm",
+            &Language::Latin,
+        );
         assert_eq!(task, TaskType::Coding);
-        assert!(conf > 0.4, "confidence {conf} should be reasonable for coding request");
+        assert!(
+            conf > 0.4,
+            "confidence {conf} should be reasonable for coding request"
+        );
     }
 
     #[test]
@@ -727,7 +894,10 @@ mod tests {
         let (_analysis, scores) = analyzer.analyze_and_score(&messages, &candidates);
         let elapsed_us = start.elapsed().as_micros();
         assert!(!scores.is_empty());
-        assert!(elapsed_us < 5000, "analyze_and_score took {elapsed_us}us, expected <5ms");
+        assert!(
+            elapsed_us < 5000,
+            "analyze_and_score took {elapsed_us}us, expected <5ms"
+        );
     }
 
     #[test]
@@ -758,8 +928,7 @@ mod tests {
             },
         };
 
-        let coding_types: Vec<String> =
-            vec!["coding".to_string(), "code_review".to_string()];
+        let coding_types: Vec<String> = vec!["coding".to_string(), "code_review".to_string()];
         let general_types: Vec<String> = vec![];
         let all_langs: Vec<String> = vec![];
 

@@ -1,10 +1,10 @@
-use actix_web::{web, HttpServer, HttpResponse, middleware, App};
-use crate::Result;
 use crate::models::{
-    ChatRequest, AnthropicRequest, AnthropicResponse, AnthropicError, AnthropicErrorDetail,
+    AnthropicError, AnthropicErrorDetail, AnthropicRequest, AnthropicResponse, ChatRequest,
 };
 use crate::router::{Router, RoutingEngine};
 use crate::utils::StatsCollector;
+use crate::Result;
+use actix_web::{middleware, web, App, HttpResponse, HttpServer};
 use serde::{Deserialize, Serialize};
 use std::collections::HashMap;
 use std::sync::Arc;
@@ -83,25 +83,13 @@ pub async fn start_server(port: u16, config: crate::Config, config_path: String)
             .route("/control/reload", web::post().to(control_reload))
             // Protocol adapters
             .route("/v1/anthropic", web::post().to(anthropic_proxy))
-            .route(
-                "/v1/anthropic/v1/messages",
-                web::post().to(anthropic_proxy),
-            )
+            .route("/v1/anthropic/v1/messages", web::post().to(anthropic_proxy))
             .route("/v1/openai", web::post().to(openai_proxy))
-            .route(
-                "/v1/openai/chat/completions",
-                web::post().to(openai_proxy),
-            )
+            .route("/v1/openai/chat/completions", web::post().to(openai_proxy))
             .route("/v1/gemini", web::post().to(gemini_proxy))
-            .route(
-                "/v1/gemini/chat/completions",
-                web::post().to(gemini_proxy),
-            )
+            .route("/v1/gemini/chat/completions", web::post().to(gemini_proxy))
             .route("/v1/codex", web::post().to(codex_proxy))
-            .route(
-                "/v1/codex/chat/completions",
-                web::post().to(codex_proxy),
-            )
+            .route("/v1/codex/chat/completions", web::post().to(codex_proxy))
             .route("/v1/auto", web::post().to(auto_route))
     })
     .bind(format!("127.0.0.1:{}", port))?
@@ -195,7 +183,11 @@ async fn control_set_override(
         ScenarioOverride::Pinned(s) => s.clone(),
     };
 
-    state.overrides.write().await.insert(body.endpoint.clone(), ov);
+    state
+        .overrides
+        .write()
+        .await
+        .insert(body.endpoint.clone(), ov);
     Ok(HttpResponse::Ok().json(serde_json::json!({
         "endpoint": &body.endpoint,
         "scenario": label,
@@ -367,11 +359,7 @@ async fn auto_route(
     let scenario = extract_scenario(&req);
     let start = std::time::Instant::now();
 
-    match state
-        .router
-        .route(&req, scenario.as_deref())
-        .await
-    {
+    match state.router.route(&req, scenario.as_deref()).await {
         Ok(response) => {
             let elapsed = start.elapsed().as_millis() as u64;
             state

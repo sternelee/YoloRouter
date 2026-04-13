@@ -12,20 +12,21 @@
 
 ## File Map
 
-| File | Action | Responsibility |
-|---|---|---|
-| `src/config/parser.rs` | Modify | Add `add_model_to_scenario()`, `add_scenario()` |
-| `src/provider/models.rs` | Create | `fetch_provider_models()` — live API per provider type |
-| `src/provider/mod.rs` | Modify | `pub mod models;` |
-| `src/server/mod.rs` | Modify | Add `config_path` to `AppState`, `POST /control/reload` handler |
-| `src/main.rs` | Modify | Pass `config_path` to `start_server()` |
-| `src/tui/mod.rs` | Modify | `ProviderViewState`, `ControlCommand`, channels, keyboard, drawing |
+| File                     | Action | Responsibility                                                     |
+| ------------------------ | ------ | ------------------------------------------------------------------ |
+| `src/config/parser.rs`   | Modify | Add `add_model_to_scenario()`, `add_scenario()`                    |
+| `src/provider/models.rs` | Create | `fetch_provider_models()` — live API per provider type             |
+| `src/provider/mod.rs`    | Modify | `pub mod models;`                                                  |
+| `src/server/mod.rs`      | Modify | Add `config_path` to `AppState`, `POST /control/reload` handler    |
+| `src/main.rs`            | Modify | Pass `config_path` to `start_server()`                             |
+| `src/tui/mod.rs`         | Modify | `ProviderViewState`, `ControlCommand`, channels, keyboard, drawing |
 
 ---
 
 ## Task 1: Config Mutation Methods
 
 **Files:**
+
 - Modify: `src/config/parser.rs`
 
 - [ ] **Step 1: Write failing tests**
@@ -40,7 +41,7 @@ mod mutation_tests {
     fn base_config() -> Config {
         Config::from_string(r#"
 [daemon]
-port = 8080
+port = 8989
 
 [providers.openai]
 type = "openai"
@@ -196,6 +197,7 @@ git commit -m "feat(config): add add_model_to_scenario and add_scenario mutation
 ## Task 2: Provider Model Fetch
 
 **Files:**
+
 - Create: `src/provider/models.rs`
 - Modify: `src/provider/mod.rs`
 
@@ -423,6 +425,7 @@ git commit -m "feat(provider): add fetch_provider_models with live API support"
 ## Task 3: Daemon Reload Endpoint
 
 **Files:**
+
 - Modify: `src/server/mod.rs`
 - Modify: `src/main.rs`
 
@@ -515,6 +518,7 @@ git commit -m "feat(server): add POST /control/reload for hot config reload"
 ## Task 4: Refactor OverrideCommand → ControlCommand
 
 **Files:**
+
 - Modify: `src/tui/mod.rs`
 
 - [ ] **Step 1: Replace `OverrideCommand` with `ControlCommand`**
@@ -665,6 +669,7 @@ git commit -m "refactor(tui): OverrideCommand → ControlCommand enum with Overr
 ## Task 5: TUI — ProviderViewState + Model Fetch Channel
 
 **Files:**
+
 - Modify: `src/tui/mod.rs`
 
 - [ ] **Step 1: Add the types**
@@ -831,6 +836,7 @@ git commit -m "feat(tui): add ProviderViewState enum and model fetch channels"
 ## Task 6: TUI — Providers Tab Keyboard Handling
 
 **Files:**
+
 - Modify: `src/tui/mod.rs`
 
 - [ ] **Step 1: Replace the Providers branch in `handle_tab_key`**
@@ -1123,6 +1129,7 @@ git commit -m "feat(tui): implement Providers tab keyboard state machine"
 ## Task 7: TUI — Providers Tab Drawing
 
 **Files:**
+
 - Modify: `src/tui/mod.rs`
 
 - [ ] **Step 1: Replace `draw_providers`**

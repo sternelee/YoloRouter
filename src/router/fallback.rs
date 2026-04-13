@@ -1,5 +1,5 @@
-use crate::models::{ChatRequest, ChatResponse};
 use crate::config::schema::ScenarioConfig;
+use crate::models::{ChatRequest, ChatResponse};
 use crate::router::ProviderRegistry;
 use crate::Result;
 

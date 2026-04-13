@@ -1,7 +1,7 @@
-use crate::models::{ChatRequest, ChatResponse, Choice, ChatMessage, Usage};
+use super::Provider;
+use crate::models::{ChatMessage, ChatRequest, ChatResponse, Choice, Usage};
 use crate::Result;
 use async_trait::async_trait;
-use super::Provider;
 use reqwest::Client;
 use serde_json::{json, Value};
 
@@ -59,7 +59,8 @@ impl Provider for AnthropicProvider {
             payload["system"] = json!(sys);
         }
 
-        let response = self.client
+        let response = self
+            .client
             .post(&url)
             .header("x-api-key", &self.api_key)
             .header("anthropic-version", "2023-06-01")
@@ -69,12 +70,15 @@ impl Provider for AnthropicProvider {
             .map_err(|e| crate::error::YoloRouterError::HttpError(e))?;
 
         if !response.status().is_success() {
-            return Err(crate::error::YoloRouterError::RequestError(
-                format!("Anthropic API error: {}", response.status())
-            ));
+            return Err(crate::error::YoloRouterError::RequestError(format!(
+                "Anthropic API error: {}",
+                response.status()
+            )));
         }
 
-        let data: Value = response.json().await
+        let data: Value = response
+            .json()
+            .await
             .map_err(|e| crate::error::YoloRouterError::HttpError(e))?;
 
         let content = data["content"]
@@ -98,7 +102,8 @@ impl Provider for AnthropicProvider {
                 prompt_tokens: data["usage"]["input_tokens"].as_u64().unwrap_or(0) as u32,
                 completion_tokens: data["usage"]["output_tokens"].as_u64().unwrap_or(0) as u32,
                 total_tokens: (data["usage"]["input_tokens"].as_u64().unwrap_or(0)
-                    + data["usage"]["output_tokens"].as_u64().unwrap_or(0)) as u32,
+                    + data["usage"]["output_tokens"].as_u64().unwrap_or(0))
+                    as u32,
             },
         })
     }

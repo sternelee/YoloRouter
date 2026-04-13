@@ -24,7 +24,7 @@ cp config.example.toml config.toml
 
 ```toml
 [daemon]
-port = 8080
+port = 8989
 log_level = "info"
 
 [providers.anthropic]
@@ -54,7 +54,7 @@ export OPENAI_API_KEY="sk-..."
 cargo run --release -- --config config.toml
 ```
 
-服务器将在 `http://127.0.0.1:8080` 启动。
+服务器将在 `http://127.0.0.1:8989` 启动。
 
 ## 配置详解
 
@@ -62,7 +62,7 @@ cargo run --release -- --config config.toml
 
 ```toml
 [daemon]
-port = 8080                    # 服务器监听端口
+port = 8989                    # 服务器监听端口
 log_level = "info"            # 日志级别：debug, info, warn, error
 
 [providers]
@@ -270,15 +270,15 @@ api_key = "lm-studio"
 
 #### Provider Type 速查表
 
-| 接口类型 | `type` 值 | 必填字段 |
-|---------|----------|---------|
-| Anthropic Messages API | `anthropic` | `api_key` |
-| OpenAI / 任何 OAI 兼容 | `openai` | `api_key` + `base_url`（官方可省）|
-| Google Gemini | `gemini` | `api_key` |
-| GitHub Copilot（Pro 订阅）| `github_copilot` | 无（OAuth 后自动加载）|
-| ChatGPT Pro（Pro 订阅）| `codex_oauth` | 无（OAuth 后自动加载）|
-| Azure OpenAI | `codex` | `api_key` + `extra.azure_endpoint` |
-| 其他任意兼容 API | 任意名称 | `api_key` + `base_url` |
+| 接口类型                   | `type` 值        | 必填字段                           |
+| -------------------------- | ---------------- | ---------------------------------- |
+| Anthropic Messages API     | `anthropic`      | `api_key`                          |
+| OpenAI / 任何 OAI 兼容     | `openai`         | `api_key` + `base_url`（官方可省） |
+| Google Gemini              | `gemini`         | `api_key`                          |
+| GitHub Copilot（Pro 订阅） | `github_copilot` | 无（OAuth 后自动加载）             |
+| ChatGPT Pro（Pro 订阅）    | `codex_oauth`    | 无（OAuth 后自动加载）             |
+| Azure OpenAI               | `codex`          | `api_key` + `extra.azure_endpoint` |
+| 其他任意兼容 API           | 任意名称         | `api_key` + `base_url`             |
 
 ### 场景定义
 
@@ -319,16 +319,16 @@ retry_count = 2               # 失败重试次数
 
 端点名决定**请求/响应格式**，不决定使用哪个 provider。实际 provider 由路由引擎选择。
 
-| 端点 | 适配格式 | 适用客户端 |
-|------|---------|-----------|
-| `POST /v1/anthropic` | Anthropic Messages API | Claude Code, Cursor |
-| `POST /v1/anthropic/v1/messages` | 同上（完整路径）| 同上 |
-| `POST /v1/openai` | OpenAI Chat Completions | OpenAI SDK |
-| `POST /v1/openai/chat/completions` | 同上（完整路径）| 同上 |
-| `POST /v1/codex` | OpenAI 格式 | Codex CLI |
-| `POST /v1/codex/chat/completions` | 同上（完整路径）| 同上 |
-| `POST /v1/gemini` | OpenAI 兼容格式 | Gemini 客户端 |
-| `POST /v1/auto` | OpenAI 格式 | 通用，15 维自动路由 |
+| 端点                               | 适配格式                | 适用客户端          |
+| ---------------------------------- | ----------------------- | ------------------- |
+| `POST /v1/anthropic`               | Anthropic Messages API  | Claude Code, Cursor |
+| `POST /v1/anthropic/v1/messages`   | 同上（完整路径）        | 同上                |
+| `POST /v1/openai`                  | OpenAI Chat Completions | OpenAI SDK          |
+| `POST /v1/openai/chat/completions` | 同上（完整路径）        | 同上                |
+| `POST /v1/codex`                   | OpenAI 格式             | Codex CLI           |
+| `POST /v1/codex/chat/completions`  | 同上（完整路径）        | 同上                |
+| `POST /v1/gemini`                  | OpenAI 兼容格式         | Gemini 客户端       |
+| `POST /v1/auto`                    | OpenAI 格式             | 通用，15 维自动路由 |
 
 ### 管理端点
 
@@ -345,17 +345,17 @@ DELETE /control/override/{endpoint}  清除覆盖
 
 ```bash
 # 全局固定到 coding 场景
-curl -X POST http://127.0.0.1:8080/control/override \
+curl -X POST http://127.0.0.1:8989/control/override \
   -H "Content-Type: application/json" \
   -d '{"endpoint":"global","scenario":"coding"}'
 
 # 只将 anthropic 端点固定到 reasoning 场景
-curl -X POST http://127.0.0.1:8080/control/override \
+curl -X POST http://127.0.0.1:8989/control/override \
   -H "Content-Type: application/json" \
   -d '{"endpoint":"anthropic","scenario":"reasoning"}'
 
 # 恢复自动路由
-curl -X DELETE http://127.0.0.1:8080/control/override/global
+curl -X DELETE http://127.0.0.1:8989/control/override/global
 ```
 
 也可在 TUI 的 Scenarios 标签页按 `Enter` 固定场景，按 `a` 恢复自动。
@@ -419,7 +419,7 @@ curl -X DELETE http://127.0.0.1:8080/control/override/global
 ### 使用 curl
 
 ```bash
-curl -X POST http://127.0.0.1:8080/v1/anthropic \
+curl -X POST http://127.0.0.1:8989/v1/anthropic \
   -H "Content-Type: application/json" \
   -d '{
     "model": "claude-opus",
@@ -434,7 +434,7 @@ curl -X POST http://127.0.0.1:8080/v1/anthropic \
 import requests
 
 response = requests.post(
-    "http://127.0.0.1:8080/v1/auto",
+    "http://127.0.0.1:8989/v1/auto",
     json={
         "model": "claude-opus",
         "messages": [{"role": "user", "content": "Say hello!"}],
@@ -448,14 +448,14 @@ print(response.json())
 ### 使用 JavaScript
 
 ```javascript
-const response = await fetch("http://127.0.0.1:8080/v1/openai", {
+const response = await fetch("http://127.0.0.1:8989/v1/openai", {
   method: "POST",
   headers: { "Content-Type": "application/json" },
   body: JSON.stringify({
     model: "gpt-4",
     messages: [{ role: "user", content: "Say hello!" }],
-    max_tokens: 100
-  })
+    max_tokens: 100,
+  }),
 });
 
 console.log(await response.json());
@@ -488,7 +488,7 @@ models = [
 ### 健康检查
 
 ```bash
-curl http://127.0.0.1:8080/health
+curl http://127.0.0.1:8989/health
 ```
 
 响应示例：
@@ -506,13 +506,13 @@ curl http://127.0.0.1:8080/health
 ### 查看配置
 
 ```bash
-curl http://127.0.0.1:8080/config
+curl http://127.0.0.1:8989/config
 ```
 
 ### 请求统计
 
 ```bash
-curl http://127.0.0.1:8080/stats
+curl http://127.0.0.1:8989/stats
 ```
 
 响应示例：
@@ -586,6 +586,7 @@ timeout_ms = 60000
 **症状**：请求返回 401/403 错误
 
 **解决方案**：
+
 1. 验证 API 密钥正确
 2. 检查环境变量设置
 3. 确认提供商的认证方式（OAuth vs API Key）
@@ -595,6 +596,7 @@ timeout_ms = 60000
 **症状**：请求超过 30 秒无响应
 
 **解决方案**：
+
 1. 增加 `timeout_ms` 值
 2. 检查网络连接
 3. 验证提供商服务状态
@@ -604,6 +606,7 @@ timeout_ms = 60000
 **症状**：第一个模型失败，没有尝试备用模型
 
 **解决方案**：
+
 1. 检查 `fallback_enabled = true`
 2. 验证场景配置有多个模型
 3. 检查所有引用的提供商都已配置
@@ -613,6 +616,7 @@ timeout_ms = 60000
 **症状**：返回 "provider not found" 错误
 
 **解决方案**：
+
 1. 检查提供商名称拼写
 2. 验证提供商已在 `[providers]` 部分配置
 3. 确认 API 密钥有效
@@ -676,4 +680,3 @@ cp config.toml config.toml.backup
 ## 许可证
 
 MIT License - 详见项目仓库
-

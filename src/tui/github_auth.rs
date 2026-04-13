@@ -1,6 +1,7 @@
 // GitHub Copilot OAuth device flow TUI
 // Shows device code, polls for authorization, displays result
 
+use crate::provider::GitHubCopilotProvider;
 use crossterm::{
     event::{self, Event, KeyCode, KeyModifiers},
     execute,
@@ -17,7 +18,6 @@ use ratatui::{
 use std::io;
 use std::sync::{Arc, Mutex};
 use std::time::{Duration, Instant};
-use crate::provider::GitHubCopilotProvider;
 
 #[derive(Debug, Clone, PartialEq)]
 pub enum DeviceFlowState {
@@ -84,7 +84,9 @@ async fn drive_device_flow(state: Arc<Mutex<DeviceFlowState>>, client_id: String
         Ok(r) => r,
         Err(e) => {
             let mut s = state.lock().unwrap();
-            *s = DeviceFlowState::Failed { reason: e.to_string() };
+            *s = DeviceFlowState::Failed {
+                reason: e.to_string(),
+            };
             return;
         }
     };
@@ -101,16 +103,24 @@ async fn drive_device_flow(state: Arc<Mutex<DeviceFlowState>>, client_id: String
     }
 
     match provider
-        .poll_for_token(&device_resp.device_code, device_resp.interval, device_resp.expires_in)
+        .poll_for_token(
+            &device_resp.device_code,
+            device_resp.interval,
+            device_resp.expires_in,
+        )
         .await
     {
         Ok(token) => {
             let mut s = state.lock().unwrap();
-            *s = DeviceFlowState::Success { github_token: token };
+            *s = DeviceFlowState::Success {
+                github_token: token,
+            };
         }
         Err(e) => {
             let mut s = state.lock().unwrap();
-            *s = DeviceFlowState::Failed { reason: e.to_string() };
+            *s = DeviceFlowState::Failed {
+                reason: e.to_string(),
+            };
         }
     }
 }
@@ -132,7 +142,8 @@ fn event_loop(
         if event::poll(timeout)? {
             if let Event::Key(key) = event::read()? {
                 match (key.code, key.modifiers) {
-                    (KeyCode::Char('q'), _) | (KeyCode::Esc, _)
+                    (KeyCode::Char('q'), _)
+                    | (KeyCode::Esc, _)
                     | (KeyCode::Char('c'), KeyModifiers::CONTROL) => {
                         let mut s = app.state.lock().unwrap();
                         *s = DeviceFlowState::Cancelled;
@@ -143,7 +154,10 @@ fn event_loop(
                         if let DeviceFlowState::Success { ref github_token } = *s {
                             return Ok(Some(github_token.clone()));
                         }
-                        if matches!(*s, DeviceFlowState::Failed { .. } | DeviceFlowState::Cancelled) {
+                        if matches!(
+                            *s,
+                            DeviceFlowState::Failed { .. } | DeviceFlowState::Cancelled
+                        ) {
                             return Ok(None);
                         }
                     }
@@ -183,7 +197,11 @@ fn draw_ui(f: &mut ratatui::Frame, app: &DeviceFlowApp) {
 
     // Header
     let header = Paragraph::new("  GitHub Copilot OAuth Device Flow")
-        .style(Style::default().fg(Color::Cyan).add_modifier(Modifier::BOLD))
+        .style(
+            Style::default()
+                .fg(Color::Cyan)
+                .add_modifier(Modifier::BOLD),
+        )
         .block(Block::default().borders(Borders::ALL));
     f.render_widget(header, chunks[0]);
 
@@ -191,8 +209,20 @@ fn draw_ui(f: &mut ratatui::Frame, app: &DeviceFlowApp) {
     let state = app.state.lock().unwrap();
     match &*state {
         DeviceFlowState::Fetching => draw_fetching(f, app.spinner_tick, chunks[1]),
-        DeviceFlowState::WaitingForUser { user_code, verification_uri, expires_at, .. } => {
-            draw_waiting(f, user_code, verification_uri, *expires_at, app.spinner_tick, chunks[1]);
+        DeviceFlowState::WaitingForUser {
+            user_code,
+            verification_uri,
+            expires_at,
+            ..
+        } => {
+            draw_waiting(
+                f,
+                user_code,
+                verification_uri,
+                *expires_at,
+                app.spinner_tick,
+                chunks[1],
+            );
         }
         DeviceFlowState::Success { github_token } => draw_success(f, github_token, chunks[1]),
         DeviceFlowState::Failed { reason } => draw_failed(f, reason, chunks[1]),
@@ -229,7 +259,9 @@ fn draw_waiting(
     area: ratatui::layout::Rect,
 ) {
     let spin = SPINNER[(tick as usize) % SPINNER.len()];
-    let remaining = expires_at.duration_since(Instant::now().min(expires_at)).as_secs();
+    let remaining = expires_at
+        .duration_since(Instant::now().min(expires_at))
+        .as_secs();
     let total_secs = 900_u64; // typical GitHub device flow expiry
     let ratio = remaining as f64 / total_secs as f64;
 
@@ -242,17 +274,23 @@ fn draw_waiting(
         Line::from(""),
         Line::from(Span::styled(
             "  Step 1: Visit this URL in your browser",
-            Style::default().fg(Color::Cyan).add_modifier(Modifier::BOLD),
+            Style::default()
+                .fg(Color::Cyan)
+                .add_modifier(Modifier::BOLD),
         )),
         Line::from(""),
         Line::from(Span::styled(
             format!("  ➜  {}", verification_uri),
-            Style::default().fg(Color::Green).add_modifier(Modifier::UNDERLINED),
+            Style::default()
+                .fg(Color::Green)
+                .add_modifier(Modifier::UNDERLINED),
         )),
         Line::from(""),
         Line::from(Span::styled(
             "  Step 2: Enter this code",
-            Style::default().fg(Color::Cyan).add_modifier(Modifier::BOLD),
+            Style::default()
+                .fg(Color::Cyan)
+                .add_modifier(Modifier::BOLD),
         )),
         Line::from(""),
         Line::from(Span::styled(
@@ -261,7 +299,9 @@ fn draw_waiting(
         )),
         Line::from(Span::styled(
             format!("  │  {}  │", user_code),
-            Style::default().fg(Color::Yellow).add_modifier(Modifier::BOLD),
+            Style::default()
+                .fg(Color::Yellow)
+                .add_modifier(Modifier::BOLD),
         )),
         Line::from(Span::styled(
             format!("  └─────────────┘"),
@@ -280,13 +320,17 @@ fn draw_waiting(
         ]),
     ];
 
-    let para = Paragraph::new(lines)
-        .block(Block::default().borders(Borders::ALL).title(" Authorize "));
+    let para =
+        Paragraph::new(lines).block(Block::default().borders(Borders::ALL).title(" Authorize "));
     f.render_widget(para, inner[0]);
 
     // Countdown gauge
     let gauge = Gauge::default()
-        .block(Block::default().borders(Borders::ALL).title(" Time Remaining "))
+        .block(
+            Block::default()
+                .borders(Borders::ALL)
+                .title(" Time Remaining "),
+        )
         .gauge_style(Style::default().fg(Color::Green))
         .ratio(ratio.clamp(0.0, 1.0));
     f.render_widget(gauge, inner[1]);
@@ -294,7 +338,7 @@ fn draw_waiting(
 
 fn draw_success(f: &mut ratatui::Frame, token: &str, area: ratatui::layout::Rect) {
     let masked = if token.len() > 8 {
-        format!("{}...{}", &token[..4], &token[token.len()-4..])
+        format!("{}...{}", &token[..4], &token[token.len() - 4..])
     } else {
         "****".to_string()
     };
@@ -303,7 +347,9 @@ fn draw_success(f: &mut ratatui::Frame, token: &str, area: ratatui::layout::Rect
         Line::from(""),
         Line::from(Span::styled(
             "  ✅  Authorization successful!",
-            Style::default().fg(Color::Green).add_modifier(Modifier::BOLD),
+            Style::default()
+                .fg(Color::Green)
+                .add_modifier(Modifier::BOLD),
         )),
         Line::from(""),
         Line::from(vec![

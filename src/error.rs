@@ -1,5 +1,5 @@
-use thiserror::Error;
 use actix_web::{error::ResponseError, http::StatusCode, HttpResponse};
+use thiserror::Error;
 
 #[derive(Error, Debug)]
 pub enum YoloRouterError {

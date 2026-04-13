@@ -1,3 +1,8 @@
+use crossterm::{
+    event::{self, Event, KeyCode},
+    execute,
+    terminal::{disable_raw_mode, enable_raw_mode, EnterAlternateScreen, LeaveAlternateScreen},
+};
 use ratatui::{
     backend::CrosstermBackend,
     layout::{Alignment, Constraint, Direction, Layout},
@@ -7,11 +12,6 @@ use ratatui::{
     Terminal,
 };
 use std::io;
-use crossterm::{
-    event::{self, Event, KeyCode},
-    execute,
-    terminal::{disable_raw_mode, enable_raw_mode, EnterAlternateScreen, LeaveAlternateScreen},
-};
 
 #[derive(Debug, Clone)]
 pub enum AuthProvider {
@@ -133,7 +133,9 @@ impl AuthFlow {
             AuthProvider::Anthropic => {
                 "Get your API key from: https://console.anthropic.com/account/keys"
             }
-            AuthProvider::OpenAI => "Get your API key from: https://platform.openai.com/account/api-keys",
+            AuthProvider::OpenAI => {
+                "Get your API key from: https://platform.openai.com/account/api-keys"
+            }
             AuthProvider::Google => {
                 "Get your API key from: https://makersuite.google.com/app/apikey"
             }
@@ -214,9 +216,7 @@ fn setup_terminal() -> io::Result<Terminal<CrosstermBackend<io::Stdout>>> {
     Ok(terminal)
 }
 
-fn restore_terminal(
-    terminal: &mut Terminal<CrosstermBackend<io::Stdout>>,
-) -> io::Result<()> {
+fn restore_terminal(terminal: &mut Terminal<CrosstermBackend<io::Stdout>>) -> io::Result<()> {
     disable_raw_mode()?;
     execute!(terminal.backend_mut(), LeaveAlternateScreen)?;
     terminal.show_cursor()?;
@@ -236,7 +236,11 @@ fn ui(f: &mut ratatui::Frame, auth_flow: &AuthFlow) {
 
     // Title
     let title = Paragraph::new("YoloRouter Authentication Setup")
-        .style(Style::default().fg(Color::Cyan).add_modifier(Modifier::BOLD))
+        .style(
+            Style::default()
+                .fg(Color::Cyan)
+                .add_modifier(Modifier::BOLD),
+        )
         .alignment(Alignment::Center);
     f.render_widget(title, chunks[0]);
 
@@ -303,9 +307,7 @@ fn ui(f: &mut ratatui::Frame, auth_flow: &AuthFlow) {
                 auth_flow.api_key_input.len()
             );
 
-            let block = Block::default()
-                .title("Confirm")
-                .borders(Borders::ALL);
+            let block = Block::default().title("Confirm").borders(Borders::ALL);
             let paragraph = Paragraph::new(key_display)
                 .block(block)
                 .style(Style::default().fg(Color::Yellow));
@@ -364,15 +366,15 @@ mod tests {
     fn test_auth_flow_transitions() {
         let mut auth = AuthFlow::new();
         assert_eq!(auth.current_step, AuthStep::SelectProvider);
-        
+
         auth.select_provider();
         assert_eq!(auth.current_step, AuthStep::InputApiKey);
-        
+
         auth.input_char('s');
         auth.input_char('k');
         auth.input_char('-');
         assert_eq!(auth.api_key_input.len(), 3);
-        
+
         auth.confirm_key();
         assert_eq!(auth.current_step, AuthStep::ConfirmKey);
     }
@@ -384,7 +386,7 @@ mod tests {
         auth.input_char('a');
         auth.input_char('b');
         assert_eq!(auth.api_key_input.len(), 2);
-        
+
         auth.backspace();
         assert_eq!(auth.api_key_input.len(), 1);
     }
@@ -394,7 +396,7 @@ mod tests {
         let mut auth = AuthFlow::new();
         auth.select_provider();
         assert_eq!(auth.current_step, AuthStep::InputApiKey);
-        
+
         auth.back();
         assert_eq!(auth.current_step, AuthStep::SelectProvider);
     }

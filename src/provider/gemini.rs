@@ -1,7 +1,7 @@
-use crate::models::{ChatRequest, ChatResponse, Choice, ChatMessage, Usage};
+use super::Provider;
+use crate::models::{ChatMessage, ChatRequest, ChatResponse, Choice, Usage};
 use crate::Result;
 use async_trait::async_trait;
-use super::Provider;
 use reqwest::Client;
 use serde_json::{json, Value};
 
@@ -31,8 +31,11 @@ impl GeminiProvider {
 #[async_trait]
 impl Provider for GeminiProvider {
     async fn send_request(&self, request: &ChatRequest) -> Result<ChatResponse> {
-        let url = format!("{}/v1beta/models/gemini-pro:generateContent?key={}", self.base_url, self.api_key);
-        
+        let url = format!(
+            "{}/v1beta/models/gemini-pro:generateContent?key={}",
+            self.base_url, self.api_key
+        );
+
         let payload = json!({
             "contents": [{
                 "parts": request.messages.iter().map(|m| {
@@ -41,7 +44,8 @@ impl Provider for GeminiProvider {
             }]
         });
 
-        let response = self.client
+        let response = self
+            .client
             .post(&url)
             .json(&payload)
             .send()
@@ -49,12 +53,15 @@ impl Provider for GeminiProvider {
             .map_err(|e| crate::error::YoloRouterError::HttpError(e))?;
 
         if !response.status().is_success() {
-            return Err(crate::error::YoloRouterError::RequestError(
-                format!("Gemini API error: {}", response.status())
-            ));
+            return Err(crate::error::YoloRouterError::RequestError(format!(
+                "Gemini API error: {}",
+                response.status()
+            )));
         }
 
-        let data: Value = response.json().await
+        let data: Value = response
+            .json()
+            .await
             .map_err(|e| crate::error::YoloRouterError::HttpError(e))?;
 
         let content = data["candidates"]
@@ -88,9 +95,6 @@ impl Provider for GeminiProvider {
     }
 
     fn model_list(&self) -> Vec<String> {
-        vec![
-            "gemini-pro".to_string(),
-            "gemini-pro-vision".to_string(),
-        ]
+        vec!["gemini-pro".to_string(), "gemini-pro-vision".to_string()]
     }
 }

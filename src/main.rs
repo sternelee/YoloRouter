@@ -1,8 +1,8 @@
-use yolo_router::{Config, server, utils, tui::TuiManager};
-use yolo_router::tui::github_auth::run_github_device_flow;
-use yolo_router::tui::codex_auth::run_codex_device_flow;
 use std::env;
 use std::path::PathBuf;
+use yolo_router::tui::codex_auth::run_codex_device_flow;
+use yolo_router::tui::github_auth::run_github_device_flow;
+use yolo_router::{server, tui::TuiManager, utils, Config};
 
 #[actix_web::main]
 async fn main() -> yolo_router::Result<()> {
@@ -12,7 +12,11 @@ async fn main() -> yolo_router::Result<()> {
     let tui_mode = args.contains(&"--tui".to_string());
 
     // --auth <provider> subcommand
-    if let Some(provider) = args.windows(2).find(|w| w[0] == "--auth").map(|w| w[1].as_str()) {
+    if let Some(provider) = args
+        .windows(2)
+        .find(|w| w[0] == "--auth")
+        .map(|w| w[1].as_str())
+    {
         return run_auth(provider).await;
     }
 
@@ -57,8 +61,14 @@ async fn main() -> yolo_router::Result<()> {
     tracing::info!("Config file: {}", config_path);
     tracing::info!("Listening on 127.0.0.1:{}", daemon_config.port);
     tracing::info!("Log level: {}", daemon_config.log_level);
-    tracing::info!("Providers configured: {:?}", config.providers().keys().collect::<Vec<_>>());
-    tracing::info!("Scenarios configured: {:?}", config.scenarios().keys().collect::<Vec<_>>());
+    tracing::info!(
+        "Providers configured: {:?}",
+        config.providers().keys().collect::<Vec<_>>()
+    );
+    tracing::info!(
+        "Scenarios configured: {:?}",
+        config.scenarios().keys().collect::<Vec<_>>()
+    );
 
     server::start_server(daemon_config.port, config, config_path.clone()).await?;
 
@@ -132,5 +142,3 @@ fn codex_token_path() -> PathBuf {
         .join("yolo-router")
         .join("codex_oauth.json")
 }
-
-

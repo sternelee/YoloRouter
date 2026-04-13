@@ -1,10 +1,11 @@
 pub mod auth;
+pub mod codex_auth;
 pub mod config_editor;
 pub mod github_auth;
-pub mod codex_auth;
 
 pub use auth::AuthFlow;
 
+use crate::config::Config;
 use crossterm::{
     event::{self, DisableMouseCapture, EnableMouseCapture, Event, KeyCode, KeyModifiers},
     execute,
@@ -21,7 +22,6 @@ use ratatui::{
 use std::io;
 use std::sync::mpsc;
 use std::time::Duration;
-use crate::config::Config;
 
 // ─── Tab Index ───────────────────────────────────────────────────────────────
 
@@ -39,20 +39,20 @@ enum ActiveTab {
 impl ActiveTab {
     fn next(&self) -> Self {
         match self {
-            ActiveTab::Status    => ActiveTab::Providers,
+            ActiveTab::Status => ActiveTab::Providers,
             ActiveTab::Providers => ActiveTab::Scenarios,
             ActiveTab::Scenarios => ActiveTab::Auth,
-            ActiveTab::Auth      => ActiveTab::Help,
-            ActiveTab::Help      => ActiveTab::Status,
+            ActiveTab::Auth => ActiveTab::Help,
+            ActiveTab::Help => ActiveTab::Status,
         }
     }
     fn prev(&self) -> Self {
         match self {
-            ActiveTab::Status    => ActiveTab::Help,
+            ActiveTab::Status => ActiveTab::Help,
             ActiveTab::Providers => ActiveTab::Status,
             ActiveTab::Scenarios => ActiveTab::Providers,
-            ActiveTab::Auth      => ActiveTab::Scenarios,
-            ActiveTab::Help      => ActiveTab::Auth,
+            ActiveTab::Auth => ActiveTab::Scenarios,
+            ActiveTab::Help => ActiveTab::Auth,
         }
     }
     fn index(&self) -> usize {
@@ -64,7 +64,10 @@ impl ActiveTab {
 
 #[derive(Debug)]
 pub enum ControlCommand {
-    Override { endpoint: String, scenario: Option<String> },
+    Override {
+        endpoint: String,
+        scenario: Option<String>,
+    },
     Reload,
 }
 
@@ -96,8 +99,12 @@ pub enum ProviderViewState {
         creating_new: bool,
         new_name_input: String,
     },
-    Done { message: String },
-    Error { message: String },
+    Done {
+        message: String,
+    },
+    Error {
+        message: String,
+    },
 }
 
 // ─── TuiApp State ────────────────────────────────────────────────────────────
@@ -149,7 +156,9 @@ impl TuiApp {
             provider_list_state,
             scenario_list_state,
             scenario_names,
-            status_message: "Ready. Tab/Shift+Tab: switch tabs  |  Scenarios: Enter=pin, a=auto  |  q=quit".to_string(),
+            status_message:
+                "Ready. Tab/Shift+Tab: switch tabs  |  Scenarios: Enter=pin, a=auto  |  q=quit"
+                    .to_string(),
             active_override: None,
             cmd_tx,
             status_rx,
@@ -205,7 +214,8 @@ impl TuiManager {
                             Ok(resp) => format!("❌ Override failed: HTTP {}", resp.status()),
                             Err(e) => {
                                 if e.is_timeout() || e.is_connect() {
-                                    "⚠️  Daemon offline — start daemon first (yolo-router)".to_string()
+                                    "⚠️  Daemon offline — start daemon first (yolo-router)"
+                                        .to_string()
                                 } else {
                                     format!("❌ {}", e)
                                 }
@@ -220,9 +230,7 @@ impl TuiManager {
                             .send()
                             .await
                         {
-                            Ok(resp) if resp.status().is_success() => {
-                                "✅ 已实时生效".to_string()
-                            }
+                            Ok(resp) if resp.status().is_success() => "✅ 已实时生效".to_string(),
                             Ok(resp) => {
                                 let status = resp.status();
                                 let body = resp.text().await.unwrap_or_default();
@@ -232,9 +240,7 @@ impl TuiManager {
                                     format!("⚠️  热重载状态异常: HTTP {}", status)
                                 }
                             }
-                            Err(_) => {
-                                "⚠️  已写入 config.toml，daemon 离线，重启后生效".to_string()
-                            }
+                            Err(_) => "⚠️  已写入 config.toml，daemon 离线，重启后生效".to_string(),
                         }
                     }
                 };
@@ -244,7 +250,8 @@ impl TuiManager {
 
         // Background task: fetch model lists from provider APIs
         let (model_req_tx, mut model_req_rx) = tokio::sync::mpsc::channel::<ModelFetchRequest>(4);
-        let (model_res_tx, model_res_rx) = std::sync::mpsc::channel::<Result<Vec<String>, String>>();
+        let (model_res_tx, model_res_rx) =
+            std::sync::mpsc::channel::<Result<Vec<String>, String>>();
 
         tokio::spawn(async move {
             while let Some(req) = model_req_rx.recv().await {
@@ -255,7 +262,14 @@ impl TuiManager {
 
         // Run blocking TUI in a dedicated OS thread
         tokio::task::spawn_blocking(move || {
-            if let Err(e) = run_tui(config, config_path, cmd_tx, status_rx, model_req_tx, model_res_rx) {
+            if let Err(e) = run_tui(
+                config,
+                config_path,
+                cmd_tx,
+                status_rx,
+                model_req_tx,
+                model_res_rx,
+            ) {
                 eprintln!("TUI error: {e}");
             }
         })
@@ -276,7 +290,11 @@ fn setup_terminal() -> io::Result<Terminal<CrosstermBackend<io::Stdout>>> {
 
 fn restore_terminal(terminal: &mut Terminal<CrosstermBackend<io::Stdout>>) {
     let _ = disable_raw_mode();
-    let _ = execute!(terminal.backend_mut(), LeaveAlternateScreen, DisableMouseCapture);
+    let _ = execute!(
+        terminal.backend_mut(),
+        LeaveAlternateScreen,
+        DisableMouseCapture
+    );
     let _ = terminal.show_cursor();
 }
 
@@ -291,7 +309,14 @@ fn run_tui(
     model_res_rx: std::sync::mpsc::Receiver<Result<Vec<String>, String>>,
 ) -> io::Result<()> {
     let mut terminal = setup_terminal()?;
-    let mut app = TuiApp::new(config, config_path, cmd_tx, status_rx, model_req_tx, model_res_rx);
+    let mut app = TuiApp::new(
+        config,
+        config_path,
+        cmd_tx,
+        status_rx,
+        model_req_tx,
+        model_res_rx,
+    );
     let result = event_loop(&mut terminal, &mut app);
     restore_terminal(&mut terminal);
     result
@@ -320,7 +345,10 @@ fn event_loop(
                     Ok(models) if models.is_empty() => ProviderViewState::Error {
                         message: "No models returned by this provider".to_string(),
                     },
-                    Ok(models) => ProviderViewState::ModelList { models, selected: 0 },
+                    Ok(models) => ProviderViewState::ModelList {
+                        models,
+                        selected: 0,
+                    },
                     Err(e) => ProviderViewState::Error { message: e },
                 };
             }
@@ -358,13 +386,17 @@ fn commit_model_to_scenario(
     is_new: bool,
 ) {
     let result = if is_new {
-        app.config.add_scenario(scenario_name, provider_name, model, cost_tier)
+        app.config
+            .add_scenario(scenario_name, provider_name, model, cost_tier)
     } else {
-        app.config.add_model_to_scenario(scenario_name, provider_name, model, cost_tier)
+        app.config
+            .add_model_to_scenario(scenario_name, provider_name, model, cost_tier)
     };
 
     if let Err(e) = result {
-        app.provider_view = ProviderViewState::Error { message: e.to_string() };
+        app.provider_view = ProviderViewState::Error {
+            message: e.to_string(),
+        };
         return;
     }
 
@@ -377,9 +409,16 @@ fn commit_model_to_scenario(
 
     let _ = app.cmd_tx.try_send(ControlCommand::Reload);
 
-    let action = if is_new { "创建并加入场景" } else { "加入场景" };
+    let action = if is_new {
+        "创建并加入场景"
+    } else {
+        "加入场景"
+    };
     app.provider_view = ProviderViewState::Done {
-        message: format!("✅ {}/{} {} '{}'，正在通知 daemon…", provider_name, model, action, scenario_name),
+        message: format!(
+            "✅ {}/{} {} '{}'，正在通知 daemon…",
+            provider_name, model, action, scenario_name
+        ),
     };
 }
 
@@ -391,12 +430,20 @@ fn handle_tab_key(app: &mut TuiApp, key: KeyCode) {
                 ProviderViewState::ProviderDetail => match key {
                     KeyCode::Down | KeyCode::Char('j') => {
                         let i = app.provider_list_state.selected().unwrap_or(0);
-                        let next = if providers.is_empty() { 0 } else { (i + 1) % providers.len() };
+                        let next = if providers.is_empty() {
+                            0
+                        } else {
+                            (i + 1) % providers.len()
+                        };
                         app.provider_list_state.select(Some(next));
                     }
                     KeyCode::Up | KeyCode::Char('k') => {
                         let i = app.provider_list_state.selected().unwrap_or(0);
-                        let prev = if i == 0 { providers.len().saturating_sub(1) } else { i - 1 };
+                        let prev = if i == 0 {
+                            providers.len().saturating_sub(1)
+                        } else {
+                            i - 1
+                        };
                         app.provider_list_state.select(Some(prev));
                     }
                     KeyCode::Enter => {
@@ -410,7 +457,10 @@ fn handle_tab_key(app: &mut TuiApp, key: KeyCode) {
                                     app.provider_view = ProviderViewState::FetchingModels;
                                 } else {
                                     app.provider_view = ProviderViewState::Error {
-                                        message: format!("Failed to load provider '{}' config", name),
+                                        message: format!(
+                                            "Failed to load provider '{}' config",
+                                            name
+                                        ),
                                     };
                                 }
                             }
@@ -428,12 +478,26 @@ fn handle_tab_key(app: &mut TuiApp, key: KeyCode) {
                 ProviderViewState::ModelList { models, selected } => {
                     match key {
                         KeyCode::Down | KeyCode::Char('j') => {
-                            let next = if models.is_empty() { 0 } else { (selected + 1) % models.len() };
-                            app.provider_view = ProviderViewState::ModelList { models, selected: next };
+                            let next = if models.is_empty() {
+                                0
+                            } else {
+                                (selected + 1) % models.len()
+                            };
+                            app.provider_view = ProviderViewState::ModelList {
+                                models,
+                                selected: next,
+                            };
                         }
                         KeyCode::Up | KeyCode::Char('k') => {
-                            let prev = if selected == 0 { models.len().saturating_sub(1) } else { selected - 1 };
-                            app.provider_view = ProviderViewState::ModelList { models, selected: prev };
+                            let prev = if selected == 0 {
+                                models.len().saturating_sub(1)
+                            } else {
+                                selected - 1
+                            };
+                            app.provider_view = ProviderViewState::ModelList {
+                                models,
+                                selected: prev,
+                            };
                         }
                         KeyCode::Enter => {
                             if let Some(model) = models.get(selected).cloned() {
@@ -450,37 +514,41 @@ fn handle_tab_key(app: &mut TuiApp, key: KeyCode) {
                     }
                 }
 
-                ProviderViewState::CostTierPicker { model, selected } => {
-                    match key {
-                        KeyCode::Down | KeyCode::Char('j') => {
-                            app.provider_view = ProviderViewState::CostTierPicker {
-                                model, selected: (selected + 1) % 3,
-                            };
-                        }
-                        KeyCode::Up | KeyCode::Char('k') => {
-                            app.provider_view = ProviderViewState::CostTierPicker {
-                                model, selected: if selected == 0 { 2 } else { selected - 1 },
-                            };
-                        }
-                        KeyCode::Enter => {
-                            let cost_tier = ["low", "medium", "high"][selected].to_string();
-                            app.provider_view = ProviderViewState::ScenarioPicker {
-                                model,
-                                cost_tier,
-                                selected: 0,
-                                creating_new: false,
-                                new_name_input: String::new(),
-                            };
-                        }
-                        KeyCode::Esc => {
-                            app.provider_view = ProviderViewState::ProviderDetail;
-                        }
-                        _ => {}
+                ProviderViewState::CostTierPicker { model, selected } => match key {
+                    KeyCode::Down | KeyCode::Char('j') => {
+                        app.provider_view = ProviderViewState::CostTierPicker {
+                            model,
+                            selected: (selected + 1) % 3,
+                        };
                     }
-                }
+                    KeyCode::Up | KeyCode::Char('k') => {
+                        app.provider_view = ProviderViewState::CostTierPicker {
+                            model,
+                            selected: if selected == 0 { 2 } else { selected - 1 },
+                        };
+                    }
+                    KeyCode::Enter => {
+                        let cost_tier = ["low", "medium", "high"][selected].to_string();
+                        app.provider_view = ProviderViewState::ScenarioPicker {
+                            model,
+                            cost_tier,
+                            selected: 0,
+                            creating_new: false,
+                            new_name_input: String::new(),
+                        };
+                    }
+                    KeyCode::Esc => {
+                        app.provider_view = ProviderViewState::ProviderDetail;
+                    }
+                    _ => {}
+                },
 
                 ProviderViewState::ScenarioPicker {
-                    model, cost_tier, selected, creating_new, new_name_input,
+                    model,
+                    cost_tier,
+                    selected,
+                    creating_new,
+                    new_name_input,
                 } => {
                     let mut scenario_names: Vec<String> =
                         app.config.scenarios().keys().cloned().collect();
@@ -494,7 +562,10 @@ fn handle_tab_key(app: &mut TuiApp, key: KeyCode) {
                                 let mut input = new_name_input;
                                 input.push(c);
                                 app.provider_view = ProviderViewState::ScenarioPicker {
-                                    model, cost_tier, selected, creating_new: true,
+                                    model,
+                                    cost_tier,
+                                    selected,
+                                    creating_new: true,
                                     new_name_input: input,
                                 };
                             }
@@ -502,13 +573,17 @@ fn handle_tab_key(app: &mut TuiApp, key: KeyCode) {
                                 let mut input = new_name_input;
                                 input.pop();
                                 app.provider_view = ProviderViewState::ScenarioPicker {
-                                    model, cost_tier, selected, creating_new: true,
+                                    model,
+                                    cost_tier,
+                                    selected,
+                                    creating_new: true,
                                     new_name_input: input,
                                 };
                             }
                             KeyCode::Enter => {
                                 if new_name_input.trim().is_empty() {
-                                    app.status_message = "⚠️  Scenario name cannot be empty".to_string();
+                                    app.status_message =
+                                        "⚠️  Scenario name cannot be empty".to_string();
                                 } else {
                                     let provider_name = providers
                                         .get(app.provider_list_state.selected().unwrap_or(0))
@@ -527,7 +602,9 @@ fn handle_tab_key(app: &mut TuiApp, key: KeyCode) {
                             }
                             KeyCode::Esc => {
                                 app.provider_view = ProviderViewState::ScenarioPicker {
-                                    model, cost_tier, selected,
+                                    model,
+                                    cost_tier,
+                                    selected,
                                     creating_new: false,
                                     new_name_input: String::new(),
                                 };
@@ -538,16 +615,24 @@ fn handle_tab_key(app: &mut TuiApp, key: KeyCode) {
                         match key {
                             KeyCode::Down | KeyCode::Char('j') => {
                                 app.provider_view = ProviderViewState::ScenarioPicker {
-                                    model, cost_tier,
+                                    model,
+                                    cost_tier,
                                     selected: (selected + 1) % total,
-                                    creating_new: false, new_name_input,
+                                    creating_new: false,
+                                    new_name_input,
                                 };
                             }
                             KeyCode::Up | KeyCode::Char('k') => {
                                 app.provider_view = ProviderViewState::ScenarioPicker {
-                                    model, cost_tier,
-                                    selected: if selected == 0 { total - 1 } else { selected - 1 },
-                                    creating_new: false, new_name_input,
+                                    model,
+                                    cost_tier,
+                                    selected: if selected == 0 {
+                                        total - 1
+                                    } else {
+                                        selected - 1
+                                    },
+                                    creating_new: false,
+                                    new_name_input,
                                 };
                             }
                             KeyCode::Enter => {
@@ -557,7 +642,9 @@ fn handle_tab_key(app: &mut TuiApp, key: KeyCode) {
                                     .unwrap_or_default();
                                 if selected == new_scenario_idx {
                                     app.provider_view = ProviderViewState::ScenarioPicker {
-                                        model, cost_tier, selected,
+                                        model,
+                                        cost_tier,
+                                        selected,
                                         creating_new: true,
                                         new_name_input: String::new(),
                                     };
@@ -574,10 +661,8 @@ fn handle_tab_key(app: &mut TuiApp, key: KeyCode) {
                                 }
                             }
                             KeyCode::Esc => {
-                                app.provider_view = ProviderViewState::CostTierPicker {
-                                    model,
-                                    selected: 1,
-                                };
+                                app.provider_view =
+                                    ProviderViewState::CostTierPicker { model, selected: 1 };
                             }
                             _ => {}
                         }
@@ -604,7 +689,11 @@ fn handle_tab_key(app: &mut TuiApp, key: KeyCode) {
                 }
                 KeyCode::Up | KeyCode::Char('k') => {
                     let i = app.scenario_list_state.selected().unwrap_or(0);
-                    let prev = if i == 0 { count.saturating_sub(1) } else { i - 1 };
+                    let prev = if i == 0 {
+                        count.saturating_sub(1)
+                    } else {
+                        i - 1
+                    };
                     app.scenario_list_state.select(Some(prev));
                 }
                 KeyCode::Enter => {
@@ -620,7 +709,8 @@ fn handle_tab_key(app: &mut TuiApp, key: KeyCode) {
                                         format!("Sending override: global → {}…", name);
                                 }
                                 Err(_) => {
-                                    app.status_message = "⚠️  Request queue full, try again".to_string();
+                                    app.status_message =
+                                        "⚠️  Request queue full, try again".to_string();
                                 }
                             }
                         }
@@ -668,7 +758,9 @@ fn draw_ui(f: &mut ratatui::Frame, app: &mut TuiApp) {
             Line::from(Span::styled(
                 format!(" {}: {} ", i + 1, t),
                 if i == app.tab.index() {
-                    Style::default().fg(Color::Yellow).add_modifier(Modifier::BOLD)
+                    Style::default()
+                        .fg(Color::Yellow)
+                        .add_modifier(Modifier::BOLD)
                 } else {
                     Style::default().fg(Color::White)
                 },
@@ -677,23 +769,31 @@ fn draw_ui(f: &mut ratatui::Frame, app: &mut TuiApp) {
         .collect();
 
     let tabs = Tabs::new(titles)
-        .block(Block::default().borders(Borders::ALL).title(" YoloRouter TUI "))
+        .block(
+            Block::default()
+                .borders(Borders::ALL)
+                .title(" YoloRouter TUI "),
+        )
         .select(app.tab.index())
-        .highlight_style(Style::default().fg(Color::Yellow).add_modifier(Modifier::BOLD));
+        .highlight_style(
+            Style::default()
+                .fg(Color::Yellow)
+                .add_modifier(Modifier::BOLD),
+        );
     f.render_widget(tabs, chunks[0]);
 
     // Content
     match app.tab {
-        ActiveTab::Status    => draw_status(f, app, chunks[1]),
+        ActiveTab::Status => draw_status(f, app, chunks[1]),
         ActiveTab::Providers => draw_providers(f, app, chunks[1]),
         ActiveTab::Scenarios => draw_scenarios(f, app, chunks[1]),
-        ActiveTab::Auth      => draw_auth(f, app, chunks[1]),
-        ActiveTab::Help      => draw_help(f, chunks[1]),
+        ActiveTab::Auth => draw_auth(f, app, chunks[1]),
+        ActiveTab::Help => draw_help(f, chunks[1]),
     }
 
     // Status bar
-    let status = Paragraph::new(app.status_message.as_str())
-        .style(Style::default().fg(Color::DarkGray));
+    let status =
+        Paragraph::new(app.status_message.as_str()).style(Style::default().fg(Color::DarkGray));
     f.render_widget(status, chunks[2]);
 }
 
@@ -703,10 +803,7 @@ fn draw_status(f: &mut ratatui::Frame, app: &TuiApp, area: ratatui::layout::Rect
     let routing = app.config.routing();
     let daemon = app.config.daemon();
 
-    let override_label = app
-        .active_override
-        .as_deref()
-        .unwrap_or("auto (analyzer)");
+    let override_label = app.active_override.as_deref().unwrap_or("auto (analyzer)");
 
     let lines = vec![
         Line::from(vec![
@@ -716,7 +813,10 @@ fn draw_status(f: &mut ratatui::Frame, app: &TuiApp, area: ratatui::layout::Rect
         Line::from(""),
         Line::from(vec![
             Span::styled("Daemon Port:   ", Style::default().fg(Color::Cyan)),
-            Span::raw(format!("127.0.0.1:{}  (POST /control/override to switch)", daemon.port)),
+            Span::raw(format!(
+                "127.0.0.1:{}  (POST /control/override to switch)",
+                daemon.port
+            )),
         ]),
         Line::from(vec![
             Span::styled("Log Level:     ", Style::default().fg(Color::Cyan)),
@@ -724,7 +824,12 @@ fn draw_status(f: &mut ratatui::Frame, app: &TuiApp, area: ratatui::layout::Rect
         ]),
         Line::from(""),
         Line::from(vec![
-            Span::styled("Active Routing:", Style::default().fg(Color::Yellow).add_modifier(Modifier::BOLD)),
+            Span::styled(
+                "Active Routing:",
+                Style::default()
+                    .fg(Color::Yellow)
+                    .add_modifier(Modifier::BOLD),
+            ),
             Span::raw(" "),
             Span::styled(override_label, Style::default().fg(Color::Green)),
         ]),
@@ -739,7 +844,11 @@ fn draw_status(f: &mut ratatui::Frame, app: &TuiApp, area: ratatui::layout::Rect
         ]),
         Line::from(vec![
             Span::styled("Fallback:      ", Style::default().fg(Color::Cyan)),
-            Span::raw(if routing.fallback_enabled { "enabled" } else { "disabled" }),
+            Span::raw(if routing.fallback_enabled {
+                "enabled"
+            } else {
+                "disabled"
+            }),
         ]),
         Line::from(vec![
             Span::styled("Timeout:       ", Style::default().fg(Color::Cyan)),
@@ -781,7 +890,11 @@ fn draw_providers(f: &mut ratatui::Frame, app: &mut TuiApp, area: ratatui::layou
 
     let list = List::new(items)
         .block(Block::default().borders(Borders::ALL).title(" Providers "))
-        .highlight_style(Style::default().fg(Color::Yellow).add_modifier(Modifier::BOLD))
+        .highlight_style(
+            Style::default()
+                .fg(Color::Yellow)
+                .add_modifier(Modifier::BOLD),
+        )
         .highlight_symbol("▶ ");
     f.render_stateful_widget(list, panes[0], &mut app.provider_list_state);
 
@@ -803,10 +916,18 @@ fn draw_providers(f: &mut ratatui::Frame, app: &mut TuiApp, area: ratatui::layou
                             ]),
                             Line::from(vec![
                                 Span::styled("API Key:   ", Style::default().fg(Color::Cyan)),
-                                Span::raw(cfg.api_key.as_deref().map(|k| {
-                                    if k.len() > 8 { format!("{}...{}", &k[..4], &k[k.len()-4..]) }
-                                    else { "****".to_string() }
-                                }).unwrap_or_else(|| "not set".to_string())),
+                                Span::raw(
+                                    cfg.api_key
+                                        .as_deref()
+                                        .map(|k| {
+                                            if k.len() > 8 {
+                                                format!("{}...{}", &k[..4], &k[k.len() - 4..])
+                                            } else {
+                                                "****".to_string()
+                                            }
+                                        })
+                                        .unwrap_or_else(|| "not set".to_string()),
+                                ),
                             ]),
                             Line::from(vec![
                                 Span::styled("Auth Type: ", Style::default().fg(Color::Cyan)),
@@ -822,12 +943,22 @@ fn draw_providers(f: &mut ratatui::Frame, app: &mut TuiApp, area: ratatui::layou
                                 Style::default().fg(Color::DarkGray),
                             )),
                         ]
-                    } else { vec![Line::from("Select a provider")] }
-                } else { vec![Line::from("Select a provider")] }
-            } else { vec![Line::from("No providers configured")] };
+                    } else {
+                        vec![Line::from("Select a provider")]
+                    }
+                } else {
+                    vec![Line::from("Select a provider")]
+                }
+            } else {
+                vec![Line::from("No providers configured")]
+            };
 
             let detail = Paragraph::new(detail_text)
-                .block(Block::default().borders(Borders::ALL).title(" Provider Details "))
+                .block(
+                    Block::default()
+                        .borders(Borders::ALL)
+                        .title(" Provider Details "),
+                )
                 .alignment(Alignment::Left);
             f.render_widget(detail, panes[1]);
         }
@@ -850,41 +981,54 @@ fn draw_providers(f: &mut ratatui::Frame, app: &mut TuiApp, area: ratatui::layou
         }
 
         ProviderViewState::ModelList { models, selected } => {
-            let items: Vec<ListItem> = models
-                .iter()
-                .map(|m| ListItem::new(m.as_str()))
-                .collect();
+            let items: Vec<ListItem> = models.iter().map(|m| ListItem::new(m.as_str())).collect();
             let mut state = ListState::default();
             state.select(Some(selected));
             let list = List::new(items)
-                .block(Block::default().borders(Borders::ALL)
-                    .title(format!(" Models ({}) — Enter=select  Esc=back ", models.len())))
-                .highlight_style(Style::default().fg(Color::Yellow).add_modifier(Modifier::BOLD))
+                .block(Block::default().borders(Borders::ALL).title(format!(
+                    " Models ({}) — Enter=select  Esc=back ",
+                    models.len()
+                )))
+                .highlight_style(
+                    Style::default()
+                        .fg(Color::Yellow)
+                        .add_modifier(Modifier::BOLD),
+                )
                 .highlight_symbol("▶ ");
             f.render_stateful_widget(list, panes[1], &mut state);
         }
 
         ProviderViewState::CostTierPicker { model, selected } => {
             let tiers = [
-                ("low",    "适合快速、便宜的任务"),
+                ("low", "适合快速、便宜的任务"),
                 ("medium", "平衡性价比"),
-                ("high",   "最强能力，成本最高"),
+                ("high", "最强能力，成本最高"),
             ];
             let mut lines = vec![
                 Line::from(""),
                 Line::from(vec![
                     Span::styled("Model: ", Style::default().fg(Color::Cyan)),
-                    Span::styled(model.as_str(), Style::default().fg(Color::Yellow).add_modifier(Modifier::BOLD)),
+                    Span::styled(
+                        model.as_str(),
+                        Style::default()
+                            .fg(Color::Yellow)
+                            .add_modifier(Modifier::BOLD),
+                    ),
                 ]),
                 Line::from(""),
-                Line::from(Span::styled("选择 cost tier：", Style::default().fg(Color::Cyan))),
+                Line::from(Span::styled(
+                    "选择 cost tier：",
+                    Style::default().fg(Color::Cyan),
+                )),
                 Line::from(""),
             ];
             for (i, (tier, desc)) in tiers.iter().enumerate() {
                 let is_sel = i == selected;
                 let prefix = if is_sel { "▶ " } else { "  " };
                 let style = if is_sel {
-                    Style::default().fg(Color::Yellow).add_modifier(Modifier::BOLD)
+                    Style::default()
+                        .fg(Color::Yellow)
+                        .add_modifier(Modifier::BOLD)
                 } else {
                     Style::default()
                 };
@@ -904,10 +1048,13 @@ fn draw_providers(f: &mut ratatui::Frame, app: &mut TuiApp, area: ratatui::layou
         }
 
         ProviderViewState::ScenarioPicker {
-            model, cost_tier, selected, creating_new, new_name_input,
+            model,
+            cost_tier,
+            selected,
+            creating_new,
+            new_name_input,
         } => {
-            let mut scenario_names: Vec<String> =
-                app.config.scenarios().keys().cloned().collect();
+            let mut scenario_names: Vec<String> = app.config.scenarios().keys().cloned().collect();
             scenario_names.sort();
             let new_scenario_idx = scenario_names.len();
 
@@ -917,11 +1064,16 @@ fn draw_providers(f: &mut ratatui::Frame, app: &mut TuiApp, area: ratatui::layou
                     Span::styled("Model: ", Style::default().fg(Color::Cyan)),
                     Span::styled(
                         format!("{} [{}]", model, cost_tier),
-                        Style::default().fg(Color::Yellow).add_modifier(Modifier::BOLD),
+                        Style::default()
+                            .fg(Color::Yellow)
+                            .add_modifier(Modifier::BOLD),
                     ),
                 ]),
                 Line::from(""),
-                Line::from(Span::styled("选择或新建场景：", Style::default().fg(Color::Cyan))),
+                Line::from(Span::styled(
+                    "选择或新建场景：",
+                    Style::default().fg(Color::Cyan),
+                )),
                 Line::from(""),
             ];
 
@@ -929,24 +1081,33 @@ fn draw_providers(f: &mut ratatui::Frame, app: &mut TuiApp, area: ratatui::layou
                 let is_sel = i == selected && !creating_new;
                 let prefix = if is_sel { "▶ " } else { "  " };
                 let style = if is_sel {
-                    Style::default().fg(Color::Yellow).add_modifier(Modifier::BOLD)
+                    Style::default()
+                        .fg(Color::Yellow)
+                        .add_modifier(Modifier::BOLD)
                 } else {
                     Style::default()
                 };
-                lines.push(Line::from(Span::styled(format!("{}{}", prefix, name), style)));
+                lines.push(Line::from(Span::styled(
+                    format!("{}{}", prefix, name),
+                    style,
+                )));
             }
 
             // "[+ New Scenario]" item
             if creating_new {
                 lines.push(Line::from(Span::styled(
                     format!("▶ [+ New Scenario]: {}_", new_name_input),
-                    Style::default().fg(Color::Green).add_modifier(Modifier::BOLD),
+                    Style::default()
+                        .fg(Color::Green)
+                        .add_modifier(Modifier::BOLD),
                 )));
             } else {
                 let is_sel = selected == new_scenario_idx;
                 let prefix = if is_sel { "▶ " } else { "  " };
                 let style = if is_sel {
-                    Style::default().fg(Color::Green).add_modifier(Modifier::BOLD)
+                    Style::default()
+                        .fg(Color::Green)
+                        .add_modifier(Modifier::BOLD)
                 } else {
                     Style::default().fg(Color::Green)
                 };
@@ -969,8 +1130,11 @@ fn draw_providers(f: &mut ratatui::Frame, app: &mut TuiApp, area: ratatui::layou
                 )));
             }
 
-            let para = Paragraph::new(lines)
-                .block(Block::default().borders(Borders::ALL).title(" Select Scenario "));
+            let para = Paragraph::new(lines).block(
+                Block::default()
+                    .borders(Borders::ALL)
+                    .title(" Select Scenario "),
+            );
             f.render_widget(para, panes[1]);
         }
 
@@ -979,7 +1143,9 @@ fn draw_providers(f: &mut ratatui::Frame, app: &mut TuiApp, area: ratatui::layou
                 Line::from(""),
                 Line::from(Span::styled(
                     message.as_str(),
-                    Style::default().fg(Color::Green).add_modifier(Modifier::BOLD),
+                    Style::default()
+                        .fg(Color::Green)
+                        .add_modifier(Modifier::BOLD),
                 )),
                 Line::from(""),
                 Line::from(Span::styled(
@@ -1027,17 +1193,16 @@ fn draw_scenarios(f: &mut ratatui::Frame, app: &mut TuiApp, area: ratatui::layou
                 .as_deref()
                 .map(|o| o == name)
                 .unwrap_or(false);
-            let is_default = scenarios
-                .get(name)
-                .map(|sc| sc.is_default)
-                .unwrap_or(false);
+            let is_default = scenarios.get(name).map(|sc| sc.is_default).unwrap_or(false);
             let label = match (is_active, is_default) {
                 (true, _) => format!("{name} ●"),
                 (false, true) => format!("{name} [default]"),
                 _ => name.clone(),
             };
             let style = if is_active {
-                Style::default().fg(Color::Green).add_modifier(Modifier::BOLD)
+                Style::default()
+                    .fg(Color::Green)
+                    .add_modifier(Modifier::BOLD)
             } else {
                 Style::default()
             };
@@ -1053,7 +1218,11 @@ fn draw_scenarios(f: &mut ratatui::Frame, app: &mut TuiApp, area: ratatui::layou
 
     let list = List::new(items)
         .block(Block::default().borders(Borders::ALL).title(override_hint))
-        .highlight_style(Style::default().fg(Color::Yellow).add_modifier(Modifier::BOLD))
+        .highlight_style(
+            Style::default()
+                .fg(Color::Yellow)
+                .add_modifier(Modifier::BOLD),
+        )
         .highlight_symbol("▶ ");
     f.render_stateful_widget(list, panes[0], &mut app.scenario_list_state);
 
@@ -1090,7 +1259,10 @@ fn draw_scenarios(f: &mut ratatui::Frame, app: &mut TuiApp, area: ratatui::layou
                         }),
                     ]),
                     Line::from(""),
-                    Line::from(Span::styled("Models (fallback order):", Style::default().fg(Color::Cyan))),
+                    Line::from(Span::styled(
+                        "Models (fallback order):",
+                        Style::default().fg(Color::Cyan),
+                    )),
                 ];
                 for (i, m) in sc.models.iter().enumerate() {
                     let tier = m.cost_tier.as_deref().unwrap_or("?");
@@ -1123,7 +1295,11 @@ fn draw_scenarios(f: &mut ratatui::Frame, app: &mut TuiApp, area: ratatui::layou
     };
 
     let detail = Paragraph::new(detail_lines)
-        .block(Block::default().borders(Borders::ALL).title(" Scenario Details "))
+        .block(
+            Block::default()
+                .borders(Borders::ALL)
+                .title(" Scenario Details "),
+        )
         .alignment(Alignment::Left);
     f.render_widget(detail, panes[1]);
 }
@@ -1133,7 +1309,9 @@ fn draw_auth(f: &mut ratatui::Frame, _app: &TuiApp, area: ratatui::layout::Rect)
         Line::from(""),
         Line::from(Span::styled(
             "  Authentication — OAuth Device Flows & API Keys",
-            Style::default().fg(Color::Yellow).add_modifier(Modifier::BOLD),
+            Style::default()
+                .fg(Color::Yellow)
+                .add_modifier(Modifier::BOLD),
         )),
         Line::from(""),
         Line::from(Span::styled(
@@ -1195,7 +1373,9 @@ fn draw_help(f: &mut ratatui::Frame, area: ratatui::layout::Rect) {
         Line::from(""),
         Line::from(Span::styled(
             "  Keyboard Shortcuts",
-            Style::default().fg(Color::Yellow).add_modifier(Modifier::BOLD),
+            Style::default()
+                .fg(Color::Yellow)
+                .add_modifier(Modifier::BOLD),
         )),
         Line::from(""),
         Line::from("  Tab / Shift+Tab  — Next / previous tab"),
@@ -1208,7 +1388,9 @@ fn draw_help(f: &mut ratatui::Frame, area: ratatui::layout::Rect) {
         Line::from(""),
         Line::from(Span::styled(
             "  Protocol Endpoints",
-            Style::default().fg(Color::Yellow).add_modifier(Modifier::BOLD),
+            Style::default()
+                .fg(Color::Yellow)
+                .add_modifier(Modifier::BOLD),
         )),
         Line::from(""),
         Line::from("  POST /v1/anthropic           → Anthropic Messages format (Claude Code)"),
@@ -1221,16 +1403,22 @@ fn draw_help(f: &mut ratatui::Frame, area: ratatui::layout::Rect) {
         Line::from(""),
         Line::from(Span::styled(
             "  Control API (while daemon is running)",
-            Style::default().fg(Color::Yellow).add_modifier(Modifier::BOLD),
+            Style::default()
+                .fg(Color::Yellow)
+                .add_modifier(Modifier::BOLD),
         )),
         Line::from(""),
         Line::from("  GET  /control/status         → current overrides & providers"),
-        Line::from("  POST /control/override        → {\"endpoint\":\"global\",\"scenario\":\"coding\"}"),
+        Line::from(
+            "  POST /control/override        → {\"endpoint\":\"global\",\"scenario\":\"coding\"}",
+        ),
         Line::from("  DELETE /control/override/{ep} → reset endpoint to auto"),
         Line::from(""),
         Line::from(Span::styled(
             "  CLI",
-            Style::default().fg(Color::Yellow).add_modifier(Modifier::BOLD),
+            Style::default()
+                .fg(Color::Yellow)
+                .add_modifier(Modifier::BOLD),
         )),
         Line::from(""),
         Line::from("  yolo-router                  → Start daemon"),

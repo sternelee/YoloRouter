@@ -1,10 +1,10 @@
 // OpenAI Codex / Azure OpenAI provider
 // Supports OpenAI API with custom base URL (Azure, proxies, etc.)
 
-use crate::models::{ChatRequest, ChatResponse, Choice, ChatMessage, Usage};
+use super::Provider;
+use crate::models::{ChatMessage, ChatRequest, ChatResponse, Choice, Usage};
 use crate::Result;
 use async_trait::async_trait;
-use super::Provider;
 use reqwest::Client;
 use serde_json::{json, Value};
 use std::time::Duration;
@@ -83,7 +83,8 @@ impl Provider for CodexProvider {
             "max_tokens": request.max_tokens.unwrap_or(4096),
         });
 
-        let response = self.client
+        let response = self
+            .client
             .post(&url)
             .header(auth_header_name, auth_header_value)
             .header("Content-Type", "application/json")
@@ -129,9 +130,7 @@ impl Provider for CodexProvider {
             }],
             usage: Usage {
                 prompt_tokens: data["usage"]["prompt_tokens"].as_u64().unwrap_or(0) as u32,
-                completion_tokens: data["usage"]["completion_tokens"]
-                    .as_u64()
-                    .unwrap_or(0) as u32,
+                completion_tokens: data["usage"]["completion_tokens"].as_u64().unwrap_or(0) as u32,
                 total_tokens: data["usage"]["total_tokens"].as_u64().unwrap_or(0) as u32,
             },
         })

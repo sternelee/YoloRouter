@@ -1,5 +1,5 @@
 [daemon]
-port = 8080
+port = 8989
 log_level = "info"
 
 # ─── Provider Configuration ───────────────────────────────────────────────────
@@ -61,31 +61,31 @@ is_default = false
 
 [[scenarios.coding.models]]
 provider = "github_copilot"
-model = "claude-sonnet-4-6"   # Claude Sonnet 4.6 via Copilot Pro
+model = "claude-sonnet-4-6"                              # Claude Sonnet 4.6 via Copilot Pro
 cost_tier = "low"
 capabilities = ["code", "reasoning", "complex-problems"]
 
 [[scenarios.coding.models]]
 provider = "github_copilot"
-model = "gpt-4o"              # GPT-4o via Copilot Pro
+model = "gpt-4o"                     # GPT-4o via Copilot Pro
 cost_tier = "low"
 capabilities = ["code", "reasoning"]
 
 [[scenarios.coding.models]]
 provider = "codex_oauth"
-model = "gpt-5.4"             # GPT-5.4 via ChatGPT Pro subscription
+model = "gpt-5.4"                    # GPT-5.4 via ChatGPT Pro subscription
 cost_tier = "low"
 capabilities = ["code", "reasoning"]
 
 [[scenarios.coding.models]]
 provider = "codex_oauth"
-model = "codex-davinci-002"   # Codex classic (fallback)
+model = "codex-davinci-002" # Codex classic (fallback)
 cost_tier = "low"
 capabilities = ["code"]
 
 [[scenarios.coding.models]]
 provider = "anthropic"
-model = "claude-opus-4-5"     # Paid fallback if subscriptions unavailable
+model = "claude-opus-4-5"                                # Paid fallback if subscriptions unavailable
 cost_tier = "high"
 capabilities = ["reasoning", "code", "complex-problems"]
 
@@ -118,8 +118,8 @@ capabilities = ["reasoning"]
 # ── CJK / Chinese requests ────────────────────────────────────────────────
 [scenarios.chinese]
 default_tier = "low"
-match_task_types = []         # match any task
-match_languages = ["cjk"]     # Chinese/Japanese/Korean requests
+match_task_types = []     # match any task
+match_languages = ["cjk"] # Chinese/Japanese/Korean requests
 priority = 80
 is_default = false
 
@@ -147,7 +147,7 @@ default_tier = "low"
 match_task_types = ["general", "creative", "translation"]
 match_languages = []
 priority = 50
-is_default = true             # fallback when no other scenario matches
+is_default = true                                         # fallback when no other scenario matches
 
 [[scenarios.general.models]]
 provider = "openrouter"
@@ -165,7 +165,7 @@ model = "google/gemma-2-9b-it:free"
 cost_tier = "low"
 
 [[scenarios.general.models]]
-provider = "github_copilot"  # Copilot as last-resort if OpenRouter quota hit
+provider = "github_copilot" # Copilot as last-resort if OpenRouter quota hit
 model = "gpt-4o-mini"
 cost_tier = "low"
 
@@ -178,4 +178,3 @@ retry_count = 2
 # Minimum analyzer confidence to use auto-routing (0.0–1.0)
 # Below this threshold, the default scenario is used instead
 confidence_threshold = 0.6
-

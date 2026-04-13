@@ -9,17 +9,17 @@ impl ProviderFactory {
     pub fn create_provider(name: &str, config: &ProviderConfig) -> Result<Arc<dyn Provider>> {
         match config.provider_type.as_str() {
             "anthropic" => {
-                let api_key = config
-                    .api_key
-                    .clone()
-                    .ok_or_else(|| YoloRouterError::ConfigError("Missing api_key for anthropic provider".to_string()))?;
+                let api_key = config.api_key.clone().ok_or_else(|| {
+                    YoloRouterError::ConfigError(
+                        "Missing api_key for anthropic provider".to_string(),
+                    )
+                })?;
                 Ok(Arc::new(AnthropicProvider::new(api_key)))
             }
             "openai" => {
-                let api_key = config
-                    .api_key
-                    .clone()
-                    .ok_or_else(|| YoloRouterError::ConfigError("Missing api_key for openai provider".to_string()))?;
+                let api_key = config.api_key.clone().ok_or_else(|| {
+                    YoloRouterError::ConfigError("Missing api_key for openai provider".to_string())
+                })?;
                 let mut p = OpenAIProvider::new(api_key);
                 if let Some(base_url) = &config.base_url {
                     p = p.with_base_url(base_url.clone());
@@ -27,10 +27,9 @@ impl ProviderFactory {
                 Ok(Arc::new(p))
             }
             "gemini" => {
-                let api_key = config
-                    .api_key
-                    .clone()
-                    .ok_or_else(|| YoloRouterError::ConfigError("Missing api_key for gemini provider".to_string()))?;
+                let api_key = config.api_key.clone().ok_or_else(|| {
+                    YoloRouterError::ConfigError("Missing api_key for gemini provider".to_string())
+                })?;
                 Ok(Arc::new(GeminiProvider::new(api_key)))
             }
             "github_copilot" | "github" => {
@@ -51,13 +50,14 @@ impl ProviderFactory {
                     .and_then(|v| v.as_str())
                     .unwrap_or("Iv1.b507a08c87ecfe98")
                     .to_string();
-                Ok(Arc::new(GitHubCopilotProvider::new_with_client_id(token, client_id)))
+                Ok(Arc::new(GitHubCopilotProvider::new_with_client_id(
+                    token, client_id,
+                )))
             }
             "codex" => {
-                let api_key = config
-                    .api_key
-                    .clone()
-                    .ok_or_else(|| YoloRouterError::ConfigError("Missing api_key for codex provider".to_string()))?;
+                let api_key = config.api_key.clone().ok_or_else(|| {
+                    YoloRouterError::ConfigError("Missing api_key for codex provider".to_string())
+                })?;
 
                 // Check for Azure-specific config in extra
                 let azure_endpoint = config
@@ -71,15 +71,16 @@ impl ProviderFactory {
                     .and_then(|v| v.as_str())
                     .map(String::from);
 
-                let provider = if let (Some(endpoint), Some(version)) = (azure_endpoint, api_version) {
-                    CodexProvider::with_azure(api_key, endpoint, version)
-                } else {
-                    let mut p = CodexProvider::new(api_key);
-                    if let Some(base_url) = &config.base_url {
-                        p = p.with_base_url(base_url.clone());
-                    }
-                    p
-                };
+                let provider =
+                    if let (Some(endpoint), Some(version)) = (azure_endpoint, api_version) {
+                        CodexProvider::with_azure(api_key, endpoint, version)
+                    } else {
+                        let mut p = CodexProvider::new(api_key);
+                        if let Some(base_url) = &config.base_url {
+                            p = p.with_base_url(base_url.clone());
+                        }
+                        p
+                    };
 
                 Ok(Arc::new(provider))
             }
@@ -112,15 +113,12 @@ impl ProviderFactory {
                 }
             }
             _ => {
-                let api_key = config
-                    .api_key
-                    .clone()
-                    .ok_or_else(|| {
-                        YoloRouterError::ConfigError(format!(
-                            "Missing api_key for {} provider",
-                            config.provider_type
-                        ))
-                    })?;
+                let api_key = config.api_key.clone().ok_or_else(|| {
+                    YoloRouterError::ConfigError(format!(
+                        "Missing api_key for {} provider",
+                        config.provider_type
+                    ))
+                })?;
                 let base_url = config
                     .base_url
                     .clone()
