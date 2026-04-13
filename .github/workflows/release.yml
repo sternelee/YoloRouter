@@ -1,0 +1,326 @@
+name: Release
+
+on:
+  push:
+    tags:
+      - "v*"
+
+permissions:
+  contents: write
+  packages: write
+
+env:
+  CARGO_TERM_COLOR: always
+  RUST_BACKTRACE: 1
+
+jobs:
+  # Check code quality before release
+  check:
+    name: Code Quality Check
+    runs-on: ubuntu-latest
+    steps:
+      - name: Checkout code
+        uses: actions/checkout@v4
+
+      - name: Install Rust toolchain
+        uses: dtolnay/rust-toolchain@stable
+
+      - name: Cache cargo registry
+        uses: actions/cache@v3
+        with:
+          path: ~/.cargo/registry
+          key: ${{ runner.os }}-cargo-registry-${{ hashFiles('**/Cargo.lock') }}
+
+      - name: Cache cargo index
+        uses: actions/cache@v3
+        with:
+          path: ~/.cargo/git
+          key: ${{ runner.os }}-cargo-git-${{ hashFiles('**/Cargo.lock') }}
+
+      - name: Cache cargo build
+        uses: actions/cache@v3
+        with:
+          path: target
+          key: ${{ runner.os }}-cargo-build-target-${{ hashFiles('**/Cargo.lock') }}
+
+      - name: Run tests
+        run: cargo test --lib --release
+
+      - name: Check code format
+        run: cargo fmt -- --check
+
+      - name: Run clippy
+        run: cargo clippy --all-targets --release -- -D warnings
+
+  # Build binaries for multiple platforms
+  build:
+    name: Build YoloRouter ${{ matrix.target }}
+    needs: check
+    runs-on: ${{ matrix.os }}
+    strategy:
+      fail-fast: false
+      matrix:
+        include:
+          # Linux
+          - os: ubuntu-latest
+            target: x86_64-unknown-linux-gnu
+            artifact_name: yolo-router
+            asset_name: yolo-router-linux-amd64
+            use_cross: false
+
+          # macOS Intel
+          - os: macos-latest
+            target: x86_64-apple-darwin
+            artifact_name: yolo-router
+            asset_name: yolo-router-darwin-amd64
+            use_cross: false
+
+          # macOS ARM
+          - os: macos-latest
+            target: aarch64-apple-darwin
+            artifact_name: yolo-router
+            asset_name: yolo-router-darwin-arm64
+            use_cross: false
+
+          # Windows
+          - os: windows-latest
+            target: x86_64-pc-windows-msvc
+            artifact_name: yolo-router.exe
+            asset_name: yolo-router-windows-amd64
+            use_cross: false
+
+    steps:
+      - name: Checkout code
+        uses: actions/checkout@v4
+
+      - name: Install Rust toolchain
+        uses: dtolnay/rust-toolchain@stable
+        with:
+          targets: ${{ matrix.target }}
+
+      - name: Install cross (if needed)
+        if: matrix.use_cross
+        run: cargo install cross
+
+      - name: Cache cargo registry
+        uses: actions/cache@v3
+        with:
+          path: ~/.cargo/registry
+          key: ${{ runner.os }}-cargo-registry-${{ hashFiles('**/Cargo.lock') }}
+
+      - name: Cache cargo index
+        uses: actions/cache@v3
+        with:
+          path: ~/.cargo/git
+          key: ${{ runner.os }}-cargo-git-${{ hashFiles('**/Cargo.lock') }}
+
+      - name: Cache cargo build
+        uses: actions/cache@v3
+        with:
+          path: target
+          key: ${{ runner.os }}-cargo-build-target-${{ hashFiles('**/Cargo.lock') }}
+
+      - name: Build release binary
+        run: |
+          if [ "${{ matrix.use_cross }}" = "true" ]; then
+            cross build --release --target ${{ matrix.target }}
+          else
+            cargo build --release --target ${{ matrix.target }}
+          fi
+        shell: bash
+
+      - name: Strip binary (Linux/macOS)
+        if: runner.os != 'Windows'
+        run: |
+          if [ -f "target/${{ matrix.target }}/release/${{ matrix.artifact_name }}" ]; then
+            strip target/${{ matrix.target }}/release/${{ matrix.artifact_name }} || true
+          fi
+
+      - name: Prepare artifact
+        shell: bash
+        run: |
+          BINARY_PATH="target/${{ matrix.target }}/release/${{ matrix.artifact_name }}"
+          
+          if [ ! -f "$BINARY_PATH" ]; then
+            echo "Error: Binary not found at $BINARY_PATH"
+            exit 1
+          fi
+          
+          mkdir -p release_artifacts
+          cp "$BINARY_PATH" "release_artifacts/${{ matrix.asset_name }}${{ runner.os == 'Windows' && '.exe' || '' }}"
+          
+          # Create checksum
+          cd release_artifacts
+          if [ "${{ runner.os }}" = "Windows" ]; then
+            certutil -hashfile "${{ matrix.asset_name }}.exe" SHA256 > "${{ matrix.asset_name }}.sha256"
+          else
+            sha256sum "${{ matrix.asset_name }}" > "${{ matrix.asset_name }}.sha256"
+          fi
+          cd ..
+
+      - name: Upload artifact
+        uses: actions/upload-artifact@v4
+        with:
+          name: ${{ matrix.asset_name }}
+          path: release_artifacts/
+          retention-days: 5
+
+  # Create release with all artifacts
+  release:
+    name: Create Release
+    needs: build
+    runs-on: ubuntu-latest
+    steps:
+      - name: Checkout code
+        uses: actions/checkout@v4
+
+      - name: Download all artifacts
+        uses: actions/download-artifact@v4
+        with:
+          path: artifacts/
+
+      - name: Prepare release assets
+        shell: bash
+        run: |
+          mkdir -p release_assets
+          
+          # Copy all binaries and checksums
+          find artifacts -type f \( -name "yolo-router*" -o -name "*.sha256" \) -exec cp {} release_assets/ \;
+          
+          # List all assets
+          echo "Release assets:"
+          ls -lh release_assets/
+
+      - name: Create checksums file
+        shell: bash
+        run: |
+          cd release_assets
+          cat *.sha256 > CHECKSUMS.sha256
+          cd ..
+          cat release_assets/CHECKSUMS.sha256
+
+      - name: Generate release notes
+        shell: bash
+        run: |
+          TAG=${GITHUB_REF#refs/tags/}
+          echo "## YoloRouter $TAG" > release_notes.md
+          echo "" >> release_notes.md
+          echo "Intelligent AI Model Routing Proxy for multi-provider LLM deployments." >> release_notes.md
+          echo "" >> release_notes.md
+          echo "### Changes in this release" >> release_notes.md
+          echo "" >> release_notes.md
+          echo "See [RELEASE.md](RELEASE.md) and [CHANGELOG.md](CHANGELOG.md) for details." >> release_notes.md
+          echo "" >> release_notes.md
+          echo "### Downloads" >> release_notes.md
+          echo "" >> release_notes.md
+          echo "| Platform | Download | SHA256 |" >> release_notes.md
+          echo "|----------|----------|--------|" >> release_notes.md
+          
+          for file in release_assets/yolo-router*; do
+            if [[ ! "$file" =~ \.sha256$ ]]; then
+              filename=$(basename "$file")
+              if [ -f "${file}.sha256" ]; then
+                sha256=$(cat "${file}.sha256" | awk '{print $1}')
+              else
+                sha256="N/A"
+              fi
+              platform=$(echo "$filename" | sed 's/yolo-router-//' | sed 's/\..*//')
+              echo "| $platform | \`$filename\` | \`${sha256:0:16}...\` |" >> release_notes.md
+            fi
+          done
+          
+          echo "" >> release_notes.md
+          echo "### Installation" >> release_notes.md
+          echo "" >> release_notes.md
+          echo "**Using the installer script (Recommended):**" >> release_notes.md
+          echo "" >> release_notes.md
+          echo "\`\`\`bash" >> release_notes.md
+          echo "bash install.sh" >> release_notes.md
+          echo "\`\`\`" >> release_notes.md
+          echo "" >> release_notes.md
+          echo "**Or with curl:**" >> release_notes.md
+          echo "" >> release_notes.md
+          echo "\`\`\`bash" >> release_notes.md
+          echo "curl -sSL https://raw.githubusercontent.com/sternelee/YoloRouter/main/install.sh | bash" >> release_notes.md
+          echo "\`\`\`" >> release_notes.md
+          echo "" >> release_notes.md
+          echo "### Features" >> release_notes.md
+          echo "" >> release_notes.md
+          echo "- 🔀 Intelligent multi-provider AI model routing" >> release_notes.md
+          echo "- 🛡️ Automatic fallback chains for reliability" >> release_notes.md
+          echo "- ⚙️ Flexible TOML configuration" >> release_notes.md
+          echo "- 📊 Real-time statistics and monitoring" >> release_notes.md
+          echo "- 🧠 15-dimensional model analyzer" >> release_notes.md
+          echo "- 🎯 Automatic scenario detection" >> release_notes.md
+          echo "- 💰 Cost optimization" >> release_notes.md
+          echo "" >> release_notes.md
+          echo "### Documentation" >> release_notes.md
+          echo "" >> release_notes.md
+          echo "- [Installation Guide](INSTALL.md)" >> release_notes.md
+          echo "- [User Guide](USER_GUIDE.md)" >> release_notes.md
+          echo "- [Project Summary](PROJECT_SUMMARY.md)" >> release_notes.md
+          echo "- [Quick Install](QUICK_INSTALL.txt)" >> release_notes.md
+          echo "" >> release_notes.md
+          echo "### System Requirements" >> release_notes.md
+          echo "" >> release_notes.md
+          echo "- macOS 10.12+, Linux, or Unix-like OS" >> release_notes.md
+          echo "- 256 MB RAM minimum" >> release_notes.md
+          echo "- Internet connection for API calls" >> release_notes.md
+          echo "- API keys from at least one provider" >> release_notes.md
+          echo "" >> release_notes.md
+          echo "### Verify Installation" >> release_notes.md
+          echo "" >> release_notes.md
+          echo "\`\`\`bash" >> release_notes.md
+          echo "yolo-router --version" >> release_notes.md
+          echo "curl http://127.0.0.1:8989/health" >> release_notes.md
+          echo "\`\`\`" >> release_notes.md
+
+      - name: Create GitHub Release
+        uses: softprops/action-gh-release@v1
+        with:
+          files: release_assets/*
+          body_path: release_notes.md
+          draft: false
+          prerelease: false
+        env:
+          GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+
+  # Publish documentation
+  publish-docs:
+    name: Publish Documentation
+    needs: release
+    runs-on: ubuntu-latest
+    steps:
+      - name: Checkout code
+        uses: actions/checkout@v4
+
+      - name: Setup Pages
+        uses: actions/configure-pages@v3
+
+      - name: Build documentation
+        run: |
+          mkdir -p docs_build
+          cp README.md docs_build/index.md
+          cp INSTALL.md docs_build/
+          cp USER_GUIDE.md docs_build/
+          cp PROJECT_SUMMARY.md docs_build/
+          cp QUICK_INSTALL.txt docs_build/
+          echo "# YoloRouter Documentation" > docs_build/00-index.md
+          echo "" >> docs_build/00-index.md
+          echo "Welcome to YoloRouter documentation!" >> docs_build/00-index.md
+          echo "" >> docs_build/00-index.md
+          echo "## Quick Links" >> docs_build/00-index.md
+          echo "" >> docs_build/00-index.md
+          echo "- [Quick Install](QUICK_INSTALL.txt)" >> docs_build/00-index.md
+          echo "- [Installation Guide](INSTALL.md)" >> docs_build/00-index.md
+          echo "- [User Guide](USER_GUIDE.md)" >> docs_build/00-index.md
+          echo "- [Project Summary](PROJECT_SUMMARY.md)" >> docs_build/00-index.md
+
+      - name: Upload artifact
+        uses: actions/upload-pages-artifact@v2
+        with:
+          path: 'docs_build'
+
+      - name: Deploy to GitHub Pages
+        id: deployment
+        uses: actions/deploy-pages@v2
