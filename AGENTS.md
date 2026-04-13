@@ -4,7 +4,7 @@
 
 **YoloRouter** is a Rust-based intelligent AI model routing proxy. It routes requests to multiple AI providers (Anthropic, OpenAI, Gemini, GitHub Copilot, Codex, and OpenAI-compatible services) based on scenario, cost, and capability. Supports daemon mode, TUI-driven configuration, TOML config with env var expansion, fallback chains, and HTTP API.
 
-**Status**: Feature-complete (30 unit tests passing, 1 integration test failure pending fix). Builds and runs; core features functional.
+**Status**: Feature-complete (51 tests passing). Builds and runs; all core features functional.
 
 ## Key Developer Commands
 
@@ -14,8 +14,8 @@ cargo build --release             # Production build
 cargo check                       # Quick syntax check
 
 # Test
-cargo test --lib                 # Unit tests only (30/30 passing)
-cargo test                        # All tests (integration test has 1 issue)
+cargo test --lib                 # Unit tests only (44 passing)
+cargo test                        # All tests (51 passing)
 cargo test config::              # Test specific module
 cargo test -- --nocapture        # Show println! output
 
@@ -118,9 +118,7 @@ retry_count = 2
 
 ## Testing Quick Reference
 
-**Test failure to fix**: `integration_tests.rs:48` — `ChatRequest` initializer missing `system` field. This was recently added to the schema. Update test data structures.
-
-**Unit tests** (30 passing):
+**All tests passing** (51/51):
 
 - `config::parser::tests` — TOML parsing, env expansion, validation
 - `provider::factory::tests` — Create providers, error handling
@@ -128,10 +126,16 @@ retry_count = 2
 - `router::*` — Routing engine, fallback chains
 - `analyzer::*` — Model scoring (FastAnalyzer 15D)
 - `tui::auth::tests` — Auth UI state machine
-
-**Integration test**:
-
 - `integration_tests.rs` — Full config round-trip, multi-provider scenarios
+
+**Run tests:**
+
+```bash
+cargo test --lib           # Unit tests only (44 passing)
+cargo test                 # All tests (51 passing)
+cargo test config::        # Test specific module
+cargo test -- --nocapture  # Show println! output
+```
 
 ## Critical Code Locations
 
@@ -154,7 +158,7 @@ retry_count = 2
 
 ## Common Pitfalls
 
-1. **Integration test fails** — `ChatRequest` struct changed; add missing `system: Option<String>` to test initialization
+1. **Claude Code `system` field error** — `invalid type: sequence, expected a string` means Claude Code is sending system as a content blocks array (not a string). **Fixed in latest version**; system field now supports both formats. Ensure you're running the latest build.
 2. **Config not loading** — Check env vars are exported (`export ANTHROPIC_API_KEY="***"`) and config file path is correct
 3. **Provider returns error** — In dev, providers return placeholder responses. To integrate real APIs, update `src/provider/{name}.rs:send_request()`
 4. **TUI auth doesn't persist** — Auth credentials are saved to `~/.config/yolo-router/providers.json` (see `tui/auth.rs` for path); ensure directory exists
@@ -224,6 +228,7 @@ retry_count = 2
 ## Documentation Pointers
 
 - **USER_GUIDE.md** — Full user docs (config examples, API endpoints, troubleshooting)
+- **CLAUDE_CODE_SETUP.md** — Complete Claude Code integration guide with troubleshooting
 - **.github/copilot-instructions.md** — Architecture & phases overview
 - **PROJECT_SUMMARY.md** — Detailed feature list & test summary
 - **README.md** — Project intro, quick start, features

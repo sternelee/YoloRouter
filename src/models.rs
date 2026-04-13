@@ -16,9 +16,9 @@ pub struct ChatRequest {
     pub max_tokens: Option<u32>,
     #[serde(default)]
     pub top_p: Option<f32>,
-    /// Top-level system prompt preserved from Anthropic format; used by AnthropicProvider
+    /// system 可以是字符串或 content blocks 数组（保留原始格式供 AnthropicProvider 使用）
     #[serde(default, skip_serializing_if = "Option::is_none")]
-    pub system: Option<String>,
+    pub system: Option<serde_json::Value>,
 }
 
 // ─── Anthropic protocol types ────────────────────────────────────────────────
@@ -51,8 +51,9 @@ pub struct AnthropicRequest {
     pub model: String,
     pub messages: Vec<AnthropicMessage>,
     pub max_tokens: Option<u32>,
+    /// system 可以是字符串或 content blocks 数组（来自 Claude Code）
     #[serde(default)]
-    pub system: Option<String>,
+    pub system: Option<serde_json::Value>,
     #[serde(default)]
     pub temperature: Option<f32>,
     #[serde(default)]

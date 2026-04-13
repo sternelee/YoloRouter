@@ -35,12 +35,12 @@ impl Provider for AnthropicProvider {
 
         // Separate system messages from the conversation
         // Prefer the top-level system field (from AnthropicRequest); only scan messages as fallback
-        let system: Option<String> = request.system.clone().or_else(|| {
+        let system: Option<serde_json::Value> = request.system.clone().or_else(|| {
             request
                 .messages
                 .iter()
                 .find(|m| m.role == "system")
-                .map(|m| m.content.clone())
+                .map(|m| serde_json::Value::String(m.content.clone()))
         });
 
         let messages: Vec<_> = request
@@ -57,7 +57,7 @@ impl Provider for AnthropicProvider {
         });
 
         if let Some(sys) = system {
-            payload["system"] = json!(sys);
+            payload["system"] = sys;
         }
 
         let response = self
