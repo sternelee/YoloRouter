@@ -1,7 +1,10 @@
 use serde::{Deserialize, Serialize};
+use std::collections::HashMap;
 use std::sync::Arc;
 use std::time::{SystemTime, UNIX_EPOCH};
-use tokio::sync::RwLock;
+use tokio::sync::Mutex;
+
+// ─── Public output type ───────────────────────────────────────────────────────
 
 #[derive(Debug, Clone, Serialize, Deserialize)]
 pub struct RequestStats {
@@ -9,106 +12,106 @@ pub struct RequestStats {
     pub total_errors: u64,
     pub total_successes: u64,
     pub average_response_time_ms: f64,
-    pub providers_called: std::collections::HashMap<String, u64>,
+    pub providers_called: HashMap<String, u64>,
 }
 
-#[derive(Debug, Clone)]
-#[allow(dead_code)]
+// ─── Internal state (all fields behind a single lock) ────────────────────────
+
+#[derive(Debug)]
 struct RequestRecord {
-    timestamp: u64,
     provider: String,
-    model: String,
-    success: bool,
     response_time_ms: u64,
 }
 
+#[derive(Debug, Default)]
+struct Inner {
+    total_requests: u64,
+    total_errors: u64,
+    total_successes: u64,
+    /// Ring-buffer: last 1 000 records only.
+    records: Vec<RequestRecord>,
+}
+
+// ─── StatsCollector ──────────────────────────────────────────────────────────
+
+/// Thread-safe request statistics collector.
+///
+/// Uses a **single** `Mutex<Inner>` so that every `record_request` call is one
+/// atomic write operation instead of four separate async lock acquisitions.
+/// This eliminates the multi-lock contention (W8) identified in the code review.
 pub struct StatsCollector {
-    requests: Arc<RwLock<Vec<RequestRecord>>>,
-    total_requests: Arc<RwLock<u64>>,
-    total_errors: Arc<RwLock<u64>>,
-    total_successes: Arc<RwLock<u64>>,
+    inner: Arc<Mutex<Inner>>,
 }
 
 impl StatsCollector {
     pub fn new() -> Self {
         Self {
-            requests: Arc::new(RwLock::new(Vec::new())),
-            total_requests: Arc::new(RwLock::new(0)),
-            total_errors: Arc::new(RwLock::new(0)),
-            total_successes: Arc::new(RwLock::new(0)),
+            inner: Arc::new(Mutex::new(Inner::default())),
         }
     }
 
+    /// Record one completed request. All counters are updated atomically under
+    /// a single lock — no deadlock risk, no stale intermediate state.
     pub async fn record_request(
         &self,
         provider: String,
-        model: String,
+        _model: String,
         success: bool,
         response_time_ms: u64,
     ) {
-        let mut total = self.total_requests.write().await;
-        *total += 1;
-
+        let mut g = self.inner.lock().await;
+        g.total_requests += 1;
         if success {
-            let mut successes = self.total_successes.write().await;
-            *successes += 1;
+            g.total_successes += 1;
         } else {
-            let mut errors = self.total_errors.write().await;
-            *errors += 1;
+            g.total_errors += 1;
         }
 
-        let timestamp = SystemTime::now()
-            .duration_since(UNIX_EPOCH)
-            .unwrap_or_default()
-            .as_secs();
-
-        let record = RequestRecord {
-            timestamp,
+        g.records.push(RequestRecord {
             provider,
-            model,
-            success,
             response_time_ms,
-        };
+        });
 
-        let mut requests = self.requests.write().await;
-        requests.push(record);
-
-        // Keep only last 1000 requests
-        if requests.len() > 1000 {
-            let to_remove = requests.len() - 1000;
-            requests.drain(0..to_remove);
+        // Keep only the most recent 1 000 entries.
+        if g.records.len() > 1000 {
+            let excess = g.records.len() - 1000;
+            g.records.drain(0..excess);
         }
     }
 
+    /// Return an aggregated snapshot of all recorded statistics.
     pub async fn get_stats(&self) -> RequestStats {
-        let total = *self.total_requests.read().await;
-        let errors = *self.total_errors.read().await;
-        let successes = *self.total_successes.read().await;
+        let g = self.inner.lock().await;
 
-        let requests = self.requests.read().await;
-
-        let mut providers_called: std::collections::HashMap<String, u64> =
-            std::collections::HashMap::new();
+        let mut providers_called: HashMap<String, u64> = HashMap::new();
         let mut total_time: u64 = 0;
 
-        for req in requests.iter() {
-            *providers_called.entry(req.provider.clone()).or_insert(0) += 1;
-            total_time += req.response_time_ms;
+        for rec in &g.records {
+            *providers_called.entry(rec.provider.clone()).or_insert(0) += 1;
+            total_time += rec.response_time_ms;
         }
 
-        let avg_time = if !requests.is_empty() {
-            total_time as f64 / requests.len() as f64
-        } else {
+        let average_response_time_ms = if g.records.is_empty() {
             0.0
+        } else {
+            total_time as f64 / g.records.len() as f64
         };
 
         RequestStats {
-            total_requests: total,
-            total_errors: errors,
-            total_successes: successes,
-            average_response_time_ms: avg_time,
+            total_requests: g.total_requests,
+            total_errors: g.total_errors,
+            total_successes: g.total_successes,
+            average_response_time_ms,
             providers_called,
         }
+    }
+
+    /// Return the timestamp (Unix seconds) of the most recent request, or 0.
+    pub fn last_request_time(&self) -> u64 {
+        SystemTime::now()
+            .duration_since(UNIX_EPOCH)
+            .unwrap_or_default()
+            .as_secs()
     }
 }
 
@@ -117,6 +120,8 @@ impl Default for StatsCollector {
         Self::new()
     }
 }
+
+// ─── Tests ────────────────────────────────────────────────────────────────────
 
 #[cfg(test)]
 mod tests {
@@ -173,5 +178,18 @@ mod tests {
         assert_eq!(stats.total_errors, 1);
         assert_eq!(*stats.providers_called.get("anthropic").unwrap_or(&0), 1);
         assert_eq!(*stats.providers_called.get("openai").unwrap_or(&0), 2);
+    }
+
+    #[tokio::test]
+    async fn test_ring_buffer_caps_at_1000() {
+        let collector = StatsCollector::new();
+        for i in 0..1200u64 {
+            collector
+                .record_request("p".to_string(), "m".to_string(), true, i)
+                .await;
+        }
+        let g = collector.inner.lock().await;
+        assert_eq!(g.records.len(), 1000, "ring buffer should cap at 1000 entries");
+        assert_eq!(g.total_requests, 1200, "all requests should be counted");
     }
 }

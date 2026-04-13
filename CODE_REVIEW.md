@@ -19,7 +19,7 @@ No security vulnerabilities, crash risks, or data loss found.
 
 | # | File | Issue | Status |
 |---|------|-------|--------|
-| W1 | config/parser.rs:199 | Unsafe `set_env_var` in tests (race condition in parallel) | Open |
+| W1 | config/parser.rs:199 | Unsafe `set_env_var` in tests (race condition in parallel) | **Fixed** |
 | W2 | server/mod.rs:385 | `extract_scenario()` duplicates analyzer logic | **Fixed** |
 | W3 | config/parser.rs:36 | Redundant closure `\|e\| YoloRouterError::TomlError(e)` | **Fixed** |
 | W4 | provider/factory.rs:132 | GenericProvider defaults to `gpt-3.5` model | **Fixed** |
@@ -29,8 +29,8 @@ No security vulnerabilities, crash risks, or data loss found.
 | # | File | Issue | Status |
 |---|------|-------|--------|
 | S1 | Multiple | 27 clippy warnings (redundant closures, useless format) | **Fixed** |
-| S2 | server/mod.rs | 4 proxy handlers share duplicate error/stats pattern | Open |
-| S3 | config/mod.rs | `providers()`/`scenarios()` clone entire HashMap each call | Open |
+| S2 | server/mod.rs | 4 proxy handlers share duplicate error/stats pattern | **Fixed** |
+| S3 | config/mod.rs | `providers()`/`scenarios()` clone entire HashMap each call | **Fixed** |
 | S4 | router/engine.rs | `provider:model` format undocumented | Open |
 | S5 | error.rs | Missing `From<toml::ser::Error>` | Open |
 | S6 | main.rs:123 | `--auth` error lists unsupported providers | Open |
@@ -90,7 +90,7 @@ invalid type: integer `1776059605`, expected a string
 | W5 | generic.rs:63 | `data["choices"][0]` direct index (inconsistent with other providers) | Changed to `.get(0).and_then(...)` | **Fixed** |
 | W6 | gemini.rs:39 | `temperature`/`max_tokens` ignored in Gemini payload | Added `generationConfig` block | **Fixed** |
 | W7 | anthropic.rs:37 | System prompt potentially sent twice (top-level + messages array) | Code already uses `.or_else()` correctly; added clarifying comment | **Fixed** |
-| W8 | stats.rs:49 | 3+ write locks held simultaneously in `record_request` | Open (needs architecture refactor) | Open |
+| W8 | stats.rs:49 | 3+ write locks held simultaneously in `record_request` | Refactored to single `Mutex<Inner>` | **Fixed** |
 
 ### Suggestions -- 3 issues
 
@@ -104,28 +104,23 @@ invalid type: integer `1776059605`, expected a string
 
 ## Summary
 
-### Fixed: 18 issues
+### Fixed: 22 issues
 
 | Category | Count | Details |
 |----------|-------|---------|
 | Critical | 5 | Token refresh, model hardcoding, invalid URL, deserialization, routing priority |
-| Warning | 6 | Unsafe index, duplicate system prompt, extract_scenario removal, unused params |
-| Suggestion | 7 | Clippy batch fix, API key exposure, drain waste, model_list update, format cleanup |
+| Warning | 7 | Unsafe index, duplicate system prompt, extract_scenario removal, unused params, env var race, multi-lock |
+| Suggestion | 9 | Clippy batch fix, API key exposure, drain waste, model_list update, format cleanup, duplicate handlers, HashMap clones |
 
-### Open: 4 issues
+### Open: 0 issues
 
-| # | Category | File | Issue |
-|---|----------|------|-------|
-| W1 | Warning | config/parser.rs | Unsafe env var in concurrent tests |
-| W8 | Warning | stats.rs | Multi-lock contention (needs refactor) |
-| S2 | Suggestion | server/mod.rs | 4 proxy handlers share duplicate pattern |
-| S3 | Suggestion | config/mod.rs | Config accessors clone HashMap on every call |
+All previously open issues have been resolved.
 
 ### Metrics
 
 ```
 Before review:  27 clippy warnings, 0/51 tests failing
-After review:    0 clippy warnings, 51/51 tests passing
+After review:    0 clippy warnings, 55/55 tests passing
                  0 format issues
                  Release build: OK
 ```

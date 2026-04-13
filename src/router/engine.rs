@@ -2,6 +2,7 @@ use super::{FallbackChain, ProviderRegistry};
 use crate::analyzer::{match_scenario, FastAnalyzer, ModelCandidate, ScenarioMeta};
 use crate::config::Config;
 use crate::models::{ChatRequest, ChatResponse};
+use std::collections::HashMap;
 use crate::Result;
 use std::sync::Arc;
 use std::time::Duration;
@@ -25,8 +26,8 @@ impl RoutingEngine {
         Self {
             config: Arc::new(RwLock::new(Config {
                 daemon: None,
-                providers: None,
-                scenarios: None,
+                providers: HashMap::new(),
+                scenarios: HashMap::new(),
                 routing: None,
             })),
             registry: Arc::new(ProviderRegistry::new()),

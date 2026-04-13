@@ -42,8 +42,8 @@ async fn main() -> yolo_router::Result<()> {
             }
             Config {
                 daemon: None,
-                providers: None,
-                scenarios: None,
+                providers: std::collections::HashMap::new(),
+                scenarios: std::collections::HashMap::new(),
                 routing: None,
             }
         }

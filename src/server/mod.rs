@@ -267,13 +267,14 @@ async fn anthropic_proxy(
     let chat_req = ChatRequest::from(anthro_req);
     let scenario = resolve_scenario(&state.overrides, "anthropic").await;
     let start = std::time::Instant::now();
+    let model = chat_req.model.clone();
 
     match state.router.route(&chat_req, scenario.as_deref()).await {
         Ok(resp) => {
             let elapsed = start.elapsed().as_millis() as u64;
             state
                 .stats
-                .record_request("anthropic".to_string(), chat_req.model, true, elapsed)
+                .record_request("anthropic".to_string(), model, true, elapsed)
                 .await;
             HttpResponse::Ok().json(AnthropicResponse::from(resp))
         }
@@ -281,7 +282,7 @@ async fn anthropic_proxy(
             let elapsed = start.elapsed().as_millis() as u64;
             state
                 .stats
-                .record_request("anthropic".to_string(), chat_req.model, false, elapsed)
+                .record_request("anthropic".to_string(), model, false, elapsed)
                 .await;
             tracing::error!("Anthropic proxy error: {}", e);
             HttpResponse::ServiceUnavailable().json(AnthropicError {
@@ -320,20 +321,41 @@ async fn codex_proxy(
     route_endpoint(state, req.into_inner(), "codex").await
 }
 
+/// `/v1/auto` — 15-dim analyzer picks scenario automatically.
+/// Delegates to `route_endpoint` with the "auto" label; no scenario is pinned.
+async fn auto_route(
+    state: web::Data<AppState>,
+    req: web::Json<ChatRequest>,
+) -> Result<HttpResponse> {
+    route_endpoint(state, req.into_inner(), "auto").await
+}
+
+/// Shared routing + stats helper used by every OpenAI-format endpoint.
+///
+/// Resolves any pinned scenario override for `endpoint`, forwards the request
+/// through the router (which may delegate to the 15D analyzer when
+/// `scenario = None`), records stats, and returns a uniform JSON response.
 async fn route_endpoint(
     state: web::Data<AppState>,
     req: ChatRequest,
     endpoint: &str,
 ) -> Result<HttpResponse> {
-    let scenario = resolve_scenario(&state.overrides, endpoint).await;
+    // "auto" has no pinned override — always let the analyzer decide.
+    let scenario = if endpoint == "auto" {
+        None
+    } else {
+        resolve_scenario(&state.overrides, endpoint).await
+    };
+
     let start = std::time::Instant::now();
+    let model = req.model.clone();
 
     match state.router.route(&req, scenario.as_deref()).await {
         Ok(response) => {
             let elapsed = start.elapsed().as_millis() as u64;
             state
                 .stats
-                .record_request(endpoint.to_string(), req.model, true, elapsed)
+                .record_request(endpoint.to_string(), model, true, elapsed)
                 .await;
             Ok(HttpResponse::Ok().json(response))
         }
@@ -341,40 +363,9 @@ async fn route_endpoint(
             let elapsed = start.elapsed().as_millis() as u64;
             state
                 .stats
-                .record_request(endpoint.to_string(), req.model, false, elapsed)
+                .record_request(endpoint.to_string(), model, false, elapsed)
                 .await;
             tracing::error!("{} proxy error: {}", endpoint, e);
-            Ok(HttpResponse::ServiceUnavailable().json(serde_json::json!({
-                "error": { "message": e.to_string(), "type": "api_error" }
-            })))
-        }
-    }
-}
-
-/// `/v1/auto` — 15-dim analyzer picks scenario automatically.
-async fn auto_route(
-    state: web::Data<AppState>,
-    req: web::Json<ChatRequest>,
-) -> Result<HttpResponse> {
-    let start = std::time::Instant::now();
-
-    // Always let the analyzer decide — no hardcoded scenario extraction
-    match state.router.route(&req, None).await {
-        Ok(response) => {
-            let elapsed = start.elapsed().as_millis() as u64;
-            state
-                .stats
-                .record_request("auto".to_string(), req.model.clone(), true, elapsed)
-                .await;
-            Ok(HttpResponse::Ok().json(response))
-        }
-        Err(e) => {
-            let elapsed = start.elapsed().as_millis() as u64;
-            state
-                .stats
-                .record_request("auto".to_string(), req.model.clone(), false, elapsed)
-                .await;
-            tracing::error!("Auto route error: {}", e);
             Ok(HttpResponse::ServiceUnavailable().json(serde_json::json!({
                 "error": { "message": e.to_string(), "type": "api_error" }
             })))

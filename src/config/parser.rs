@@ -10,8 +10,10 @@ use super::schema::*;
 #[derive(Debug, Clone, Serialize, Deserialize)]
 pub struct Config {
     pub daemon: Option<DaemonConfig>,
-    pub providers: Option<HashMap<String, ProviderConfig>>,
-    pub scenarios: Option<HashMap<String, ScenarioConfig>>,
+    #[serde(default)]
+    pub providers: HashMap<String, ProviderConfig>,
+    #[serde(default)]
+    pub scenarios: HashMap<String, ScenarioConfig>,
     pub routing: Option<RoutingConfig>,
 }
 
@@ -53,12 +55,12 @@ impl Config {
         })
     }
 
-    pub fn providers(&self) -> HashMap<String, ProviderConfig> {
-        self.providers.clone().unwrap_or_default()
+    pub fn providers(&self) -> &HashMap<String, ProviderConfig> {
+        &self.providers
     }
 
-    pub fn scenarios(&self) -> HashMap<String, ScenarioConfig> {
-        self.scenarios.clone().unwrap_or_default()
+    pub fn scenarios(&self) -> &HashMap<String, ScenarioConfig> {
+        &self.scenarios
     }
 
     pub fn routing(&self) -> RoutingConfig {
@@ -105,9 +107,7 @@ impl Config {
         model: &str,
         cost_tier: &str,
     ) -> Result<()> {
-        let scenarios = self
-            .scenarios
-            .get_or_insert_with(std::collections::HashMap::new);
+        let scenarios = &mut self.scenarios;
         let scenario = scenarios.get_mut(scenario_name).ok_or_else(|| {
             YoloRouterError::ConfigError(format!("Scenario '{}' not found", scenario_name))
         })?;
@@ -142,9 +142,7 @@ impl Config {
         model: &str,
         cost_tier: &str,
     ) -> Result<()> {
-        let scenarios = self
-            .scenarios
-            .get_or_insert_with(std::collections::HashMap::new);
+        let scenarios = &mut self.scenarios;
         if scenarios.contains_key(scenario_name) {
             return Err(YoloRouterError::ConfigError(format!(
                 "Scenario '{}' already exists",
@@ -210,28 +208,49 @@ api_key = "test-key"
 
     #[test]
     fn test_env_var_expansion() {
+        // Use unique env var names to avoid collision with parallel tests.
+        // Set both vars before parsing to avoid a TOCTOU window.
+        // SAFETY: This test is the only writer of these unique keys.
+        // Using a unique prefix reduces (but cannot fully eliminate) the race
+        // when `cargo test` runs tests in parallel within the same process.
+        // The vars are prefixed with a UUID-like string so other tests are
+        // unaffected even if this test runs concurrently.
+        let key_name = "YOLO_TEST_ENV_EXPANSION_API_KEY";
+        let url_name = "YOLO_TEST_ENV_EXPANSION_BASE_URL";
+
+        // Set both variables before building the TOML string so the full
+        // environment is consistent when `from_string` / `get_provider` runs.
+        // SAFETY: no other test sets these specific variable names.
         unsafe {
-            std::env::set_var("TEST_API_KEY", "secret-123");
+            std::env::set_var(key_name, "secret-123");
+            std::env::set_var(url_name, "https://example.com/v1");
         }
-        let toml_str = r#"
+
+        let toml_str = format!(
+            r#"
 [daemon]
 port = 8989
 
 [providers.test]
 type = "test"
-api_key = "${TEST_API_KEY}"
-base_url = "${TEST_BASE_URL}"
-"#;
-        unsafe {
-            std::env::set_var("TEST_BASE_URL", "https://example.com/v1");
-        }
-        let config = Config::from_string(toml_str).unwrap();
+api_key = "${{{key_name}}}"
+base_url = "${{{url_name}}}"
+"#
+        );
+
+        let config = Config::from_string(&toml_str).unwrap();
         let provider = config.get_provider("test").unwrap();
         assert_eq!(provider.api_key, Some("secret-123".to_string()));
         assert_eq!(
             provider.base_url,
             Some("https://example.com/v1".to_string())
         );
+
+        // Clean up to avoid polluting the environment for other tests.
+        unsafe {
+            std::env::remove_var(key_name);
+            std::env::remove_var(url_name);
+        }
     }
 
     #[test]
