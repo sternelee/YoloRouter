@@ -313,10 +313,18 @@ impl FastAnalyzer {
 
     fn default_perf_matrix() -> HashMap<String, [f32; 15]> {
         let mut m: HashMap<String, [f32; 15]> = HashMap::new();
+        
+        // Anthropic Claude models
         m.insert(
             "anthropic/claude-opus-4-5".to_string(),
             [
                 95., 20., 70., 97., 40., 20., 92., 80., 85., 90., 90., 95., 95., 88., 95.,
+            ],
+        );
+        m.insert(
+            "anthropic/claude-3-5-sonnet".to_string(),
+            [
+                90., 45., 78., 93., 55., 45., 90., 80., 85., 87., 88., 92., 90., 87., 90.,
             ],
         );
         m.insert(
@@ -329,6 +337,14 @@ impl FastAnalyzer {
             "anthropic/claude-haiku-4-5".to_string(),
             [
                 65., 85., 95., 75., 90., 85., 90., 72., 80., 80., 75., 82., 72., 75., 80.,
+            ],
+        );
+        
+        // OpenAI models
+        m.insert(
+            "openai/gpt-4-turbo".to_string(),
+            [
+                92., 40., 75., 94., 55., 40., 92., 85., 87., 88., 92., 92., 92., 94., 92.,
             ],
         );
         m.insert(
@@ -350,15 +366,23 @@ impl FastAnalyzer {
             ],
         );
         m.insert(
+            "openai/o1".to_string(),
+            [
+                98., 10., 45., 99., 20., 10., 85., 65., 75., 80., 75., 85., 99., 92., 95.,
+            ],
+        );
+        m.insert(
             "openai/o1-preview".to_string(),
             [
                 95., 15., 50., 98., 25., 15., 88., 70., 80., 85., 80., 90., 98., 88., 90.,
             ],
         );
+        
+        // Google Gemini models
         m.insert(
             "google/gemini-2.0-flash".to_string(),
             [
-                78., 75., 90., 82., 85., 75., 82., 72., 80., 72., 88., 85., 78., 78., 85.,
+                82., 70., 88., 85., 80., 70., 85., 75., 82., 75., 90., 87., 82., 80., 87.,
             ],
         );
         m.insert(
@@ -368,18 +392,50 @@ impl FastAnalyzer {
             ],
         );
         m.insert(
+            "google/gemini-1.5-flash".to_string(),
+            [
+                75., 80., 88., 80., 85., 80., 82., 70., 78., 72., 85., 85., 75., 78., 82.,
+            ],
+        );
+        
+        // GitHub Copilot (powered by GPT-4o)
+        m.insert(
             "github_copilot/gpt-4o".to_string(),
             [
                 88., 70., 82., 90., 65., 70., 85., 78., 80., 75., 88., 85., 88., 92., 88.,
             ],
         );
+        
+        // DeepSeek models (via OpenRouter)
+        m.insert(
+            "deepseek/deepseek-chat".to_string(),
+            [
+                80., 75., 85., 82., 80., 75., 82., 72., 78., 70., 85., 82., 80., 82., 82.,
+            ],
+        );
+        m.insert(
+            "deepseek/deepseek-coder".to_string(),
+            [
+                85., 65., 88., 80., 85., 65., 85., 78., 82., 75., 92., 85., 75., 95., 80.,
+            ],
+        );
+        
         m
     }
 
     fn default_cost_table() -> HashMap<String, ModelCost> {
         let mut c: HashMap<String, ModelCost> = HashMap::new();
+        
+        // Anthropic Claude pricing (USD per 1M tokens)
         c.insert(
             "anthropic/claude-opus-4-5".to_string(),
+            ModelCost {
+                input_price_per_1m_tokens: 3.0,
+                output_price_per_1m_tokens: 15.0,
+            },
+        );
+        c.insert(
+            "anthropic/claude-3-5-sonnet".to_string(),
             ModelCost {
                 input_price_per_1m_tokens: 3.0,
                 output_price_per_1m_tokens: 15.0,
@@ -397,6 +453,15 @@ impl FastAnalyzer {
             ModelCost {
                 input_price_per_1m_tokens: 0.25,
                 output_price_per_1m_tokens: 1.25,
+            },
+        );
+        
+        // OpenAI pricing
+        c.insert(
+            "openai/gpt-4-turbo".to_string(),
+            ModelCost {
+                input_price_per_1m_tokens: 10.0,
+                output_price_per_1m_tokens: 30.0,
             },
         );
         c.insert(
@@ -421,17 +486,26 @@ impl FastAnalyzer {
             },
         );
         c.insert(
+            "openai/o1".to_string(),
+            ModelCost {
+                input_price_per_1m_tokens: 20.0,
+                output_price_per_1m_tokens: 80.0,
+            },
+        );
+        c.insert(
             "openai/o1-preview".to_string(),
             ModelCost {
                 input_price_per_1m_tokens: 15.0,
                 output_price_per_1m_tokens: 60.0,
             },
         );
+        
+        // Google Gemini pricing
         c.insert(
             "google/gemini-2.0-flash".to_string(),
             ModelCost {
-                input_price_per_1m_tokens: 0.1,
-                output_price_per_1m_tokens: 0.4,
+                input_price_per_1m_tokens: 0.075,
+                output_price_per_1m_tokens: 0.3,
             },
         );
         c.insert(
@@ -442,12 +516,38 @@ impl FastAnalyzer {
             },
         );
         c.insert(
+            "google/gemini-1.5-flash".to_string(),
+            ModelCost {
+                input_price_per_1m_tokens: 0.075,
+                output_price_per_1m_tokens: 0.3,
+            },
+        );
+        
+        // GitHub Copilot (subscription-based, normalized to per-token cost)
+        c.insert(
             "github_copilot/gpt-4o".to_string(),
             ModelCost {
                 input_price_per_1m_tokens: 0.0,
                 output_price_per_1m_tokens: 0.0,
             },
         );
+        
+        // DeepSeek pricing (via OpenRouter or direct)
+        c.insert(
+            "deepseek/deepseek-chat".to_string(),
+            ModelCost {
+                input_price_per_1m_tokens: 0.14,
+                output_price_per_1m_tokens: 0.28,
+            },
+        );
+        c.insert(
+            "deepseek/deepseek-coder".to_string(),
+            ModelCost {
+                input_price_per_1m_tokens: 0.14,
+                output_price_per_1m_tokens: 0.28,
+            },
+        );
+        
         c
     }
 }
