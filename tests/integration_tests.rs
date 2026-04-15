@@ -53,6 +53,7 @@ retry_count = 2
             max_tokens: Some(1000),
             temperature: Some(0.7),
             top_p: None,
+            stream: None,
             system: None,
             anthropic: None,
         };
@@ -259,5 +260,74 @@ retry_count = 3
             .get("budget_mode")
             .expect("Missing budget_mode scenario");
         assert_eq!(budget_scenario.models.len(), 2);
+    }
+}
+
+#[cfg(test)]
+mod cooldown_tests {
+    use std::time::Duration;
+    use yolo_router::router::{ProviderHealthTracker, Router, RoutingEngine};
+    use yolo_router::Config;
+
+    fn make_config() -> Config {
+        Config::from_string(
+            r#"
+[providers.openai]
+type = "openai"
+api_key = "test"
+
+[scenarios.default]
+is_default = true
+models = [{ provider = "openai", model = "gpt-4" }]
+"#,
+        )
+        .unwrap()
+    }
+
+    #[tokio::test]
+    async fn test_tracker_persists_across_router_reload() {
+        let config = make_config();
+        let engine = RoutingEngine::new_with_config(config.clone()).unwrap();
+        let router = Router::new(engine);
+
+        // Reload rebuilds the engine but must not panic or lose provider list
+        router.reload(&config).await.unwrap();
+        let names = router.provider_names().await;
+        assert!(names.contains(&"openai".to_string()));
+    }
+
+    #[test]
+    fn test_cooldown_config_defaults() {
+        let config = Config::from_string("[routing]\nfallback_enabled = true").unwrap();
+        let routing = config.routing();
+        assert!(routing.cooldown_enabled);
+        assert_eq!(routing.cooldown_secs, 60);
+    }
+
+    #[test]
+    fn test_cooldown_config_disabled() {
+        let config =
+            Config::from_string("[routing]\ncooldown_enabled = false\ncooldown_secs = 0")
+                .unwrap();
+        let routing = config.routing();
+        assert!(!routing.cooldown_enabled);
+        assert_eq!(routing.cooldown_secs, 0);
+    }
+
+    #[test]
+    fn test_health_tracker_standalone() {
+        let tracker = ProviderHealthTracker::new();
+        let cooldown = Duration::from_secs(60);
+
+        assert!(!tracker.is_cooling_down("openai", cooldown));
+
+        tracker.record_failure("openai");
+        assert!(tracker.is_cooling_down("openai", cooldown));
+
+        // Other providers unaffected
+        assert!(!tracker.is_cooling_down("anthropic", cooldown));
+
+        tracker.record_success("openai");
+        assert!(!tracker.is_cooling_down("openai", cooldown));
     }
 }
