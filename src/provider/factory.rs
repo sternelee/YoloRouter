@@ -15,7 +15,11 @@ impl ProviderFactory {
                         "Missing api_key for anthropic provider".to_string(),
                     )
                 })?;
-                Ok(Arc::new(AnthropicProvider::new(api_key)))
+                let mut p = AnthropicProvider::new(api_key);
+                if let Some(base_url) = &config.base_url {
+                    p = p.with_base_url(base_url.clone());
+                }
+                Ok(Arc::new(p))
             }
             "openai" => {
                 let api_key = config.api_key.clone().ok_or_else(|| {

@@ -82,6 +82,8 @@ impl Provider for GenericProvider {
                 completion_tokens: 0,
                 total_tokens: 0,
             },
+            anthropic_content: None,
+            anthropic_stop_sequence: None,
         })
     }
 

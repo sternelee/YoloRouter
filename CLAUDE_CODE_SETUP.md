@@ -4,14 +4,49 @@ YoloRouter 现已完全支持 Claude Code 和其他 Anthropic 客户端。本文
 
 ## 问题解决
 
+### 错误：`Invalid model name 'auth'`
+
+这个错误通常是因为将 `ANTHROPIC_MODEL` 设置为了 `"auth"` 而不是 `"auto"`。
+
+**常见原因**:
+- 打字错误：将 `"auto"` 误输入为 `"auth"`
+- 混淆了 API key 和模型名配置
+
+**解决方案**:
+1. 对于自动路由,将模型设置为 `"auto"`(不是 `"auth"`)
+2. 或者指定一个具体的 Anthropic 模型:
+   - `"claude-opus-4"`
+   - `"claude-sonnet-4-5"`
+   - `"claude-haiku-4"`
+
+### ✅ 流式响应现已支持 "auto" 模型!
+
+**新功能(v0.1.0+)**: 现在可以在流式请求中使用 `model="auto"`,YoloRouter 会:
+1. 根据请求内容自动分析最佳模型
+2. 选择合适的 Anthropic 模型
+3. 开始流式传输响应
+
+**配置示例**:
+```json
+{
+  "ANTHROPIC_AUTH_TOKEN": "sk-ant-xxxxxxxxxxxxx",
+  "ANTHROPIC_BASE_URL": "http://127.0.0.1:8989/v1/anthropic",
+  "ANTHROPIC_MODEL": "auto"
+}
+```
+
+这个配置现在可以用于:
+- ✅ 非流式请求(stream=false)
+- ✅ 流式请求(stream=true) - **新支持!**
+
 ### 错误：`invalid type: sequence, expected a string`
 
-这个错误表示你的客户端发送的 `system` 字段格式不被支持。最新版本的 YoloRouter 现已支持多种 `system` 字段格式：
+这个错误表示你的客户端发送的 `system` 字段格式不被支持。最新版本的 YoloRouter 现已支持多种 `system` 字段格式:
 
-- **字符串格式**：`"system": "You are a helpful assistant"`
-- **Content blocks 格式**（Claude Code 发送）：`"system": [{"type": "text", "text": "..."}]`
+- **字符串格式**:`"system": "You are a helpful assistant"`
+- **Content blocks 格式**(Claude Code 发送):`"system": [{"type": "text", "text": "..."}]`
 
-**解决方案**：将 YoloRouter 升级到最新版本（已修复此问题）。
+**解决方案**:将 YoloRouter 升级到最新版本(已修复此问题)。
 
 ## Claude Code 配置
 
@@ -23,11 +58,11 @@ cargo build --release
 YOLO_CONFIG=config.toml ./target/release/yolo-router
 ```
 
-确保服务器在 `http://127.0.0.1:8989` 运行（或根据你的 `config.toml` 设置的端口）。
+确保服务器在 `http://127.0.0.1:8989` 运行(或根据你的 `config.toml` 设置的端口)。
 
 ### 2. 配置 Claude Code 的代理参数
 
-在 Claude Code 的设置中配置以下环境变量或代理参数：
+**推荐配置(支持流式 + 自动路由)**:
 
 ```json
 {
@@ -37,22 +72,63 @@ YOLO_CONFIG=config.toml ./target/release/yolo-router
 }
 ```
 
-**参数说明**：
+**固定模型配置(如果你想指定模型)**:
+
+```json
+{
+  "ANTHROPIC_AUTH_TOKEN": "sk-ant-xxxxxxxxxxxxx",
+  "ANTHROPIC_BASE_URL": "http://127.0.0.1:8989/v1/anthropic",
+  "ANTHROPIC_MODEL": "claude-opus-4"
+}
+```
+
+**参数说明**:
 
 | 参数 | 值 | 说明 |
 |------|-----|------|
 | `ANTHROPIC_AUTH_TOKEN` | 你的 Anthropic API Key | 从 [console.anthropic.com](https://console.anthropic.com) 获取 |
-| `ANTHROPIC_BASE_URL` | `http://127.0.0.1:8989/v1/anthropic` | YoloRouter 的 Anthropic 端点（不要修改路径部分） |
-| `ANTHROPIC_MODEL` | `auto` | 由 YoloRouter 根据 15D 分析自动选择，或指定具体模型如 `claude-opus` |
+| `ANTHROPIC_BASE_URL` | `http://127.0.0.1:8989/v1/anthropic` | YoloRouter 的 Anthropic 端点(不要修改路径部分) |
+| `ANTHROPIC_MODEL` | `auto` 或具体模型名 | **推荐 `auto`** - 智能选择最佳模型<br>或指定如 `claude-opus-4` |
 
-### 3. 验证连接
+**有效的模型名示例**:
+- `auto` — **推荐** - YoloRouter 智能选择(支持流式!)
+- `claude-opus-4` — 最强大的模型
+- `claude-sonnet-4-5` — 平衡性能和成本
+- `claude-haiku-4` — 最快最便宜
+- `anthropic:claude-opus-4` — 带 provider 前缀(可选)
 
-启动 Claude Code 后，你应该看到：
+### 3. 配置场景(可选,推荐)
+
+在 `config.toml` 中添加场景定义,YoloRouter 会根据请求内容自动选择:
+
+```toml
+[scenarios.coding]
+models = [
+  { provider = "anthropic", model = "claude-opus-4", cost_tier = "high" },
+  { provider = "anthropic", model = "claude-sonnet-4", cost_tier = "medium" }
+]
+match_task_types = ["coding"]
+
+[scenarios.general]
+models = [
+  { provider = "anthropic", model = "claude-sonnet-4", cost_tier = "medium" },
+  { provider = "anthropic", model = "claude-haiku-4", cost_tier = "low" }
+]
+is_default = true
+```
+
+当使用 `model="auto"` 时:
+- 编程相关请求 → 选择 `coding` 场景 → `claude-opus-4`
+- 其他请求 → 选择 `general` 场景 → `claude-sonnet-4`
+
+### 4. 验证连接
+
+启动 Claude Code 后,你应该看到:
 
 ```bash
-# 在 YoloRouter 日志中：
+# 在 YoloRouter 日志中:
 [INFO] POST /v1/anthropic - 200 OK (1234ms)
-[INFO] Routing: scenario=coding, provider=anthropic, model=claude-opus
+[INFO] Auto-selected model for streaming request model=claude-opus-4 scenario=Some("coding")
 ```
 
 ## 高级配置

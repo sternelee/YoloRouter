@@ -247,7 +247,7 @@ impl Provider for GitHubCopilotProvider {
             "model": model,
             "messages": request.messages,
             "temperature": request.temperature.unwrap_or(0.7),
-            "max_tokens": request.max_tokens.unwrap_or(4096),
+            "max_completion_tokens": request.max_tokens.unwrap_or(4096),
             "stream": false
         });
 
@@ -306,7 +306,58 @@ impl Provider for GitHubCopilotProvider {
                 completion_tokens: data["usage"]["completion_tokens"].as_u64().unwrap_or(0) as u32,
                 total_tokens: data["usage"]["total_tokens"].as_u64().unwrap_or(0) as u32,
             },
+            anthropic_content: None,
+            anthropic_stop_sequence: None,
         })
+    }
+    
+    async fn start_streaming_request(&self, request: &ChatRequest) -> Result<reqwest::Response> {
+        let copilot_token = self.get_copilot_token().await?;
+
+        let model = if request.model.is_empty() || request.model == "auto" {
+            "gpt-4o".to_string()
+        } else {
+            request.model.clone()
+        };
+
+        let payload = json!({
+            "model": model,
+            "messages": request.messages,
+            "temperature": request.temperature.unwrap_or(0.7),
+            "max_completion_tokens": request.max_tokens.unwrap_or(4096),
+            "stream": true
+        });
+
+        let response = self
+            .client
+            .post(COPILOT_CHAT_URL)
+            .header("Authorization", format!("Bearer {}", copilot_token))
+            .header("Content-Type", "application/json")
+            .header("Accept", "text/event-stream")
+            .header("Copilot-Integration-Id", "vscode-chat")
+            .header("Editor-Version", COPILOT_EDITOR_VERSION)
+            .header("Editor-Plugin-Version", COPILOT_PLUGIN_VERSION)
+            .header("User-Agent", COPILOT_USER_AGENT)
+            .header("x-github-api-version", COPILOT_API_VERSION)
+            .json(&payload)
+            .send()
+            .await
+            .map_err(crate::error::YoloRouterError::HttpError)?;
+
+        if !response.status().is_success() {
+            let status = response.status();
+            let body = response.text().await.unwrap_or_default();
+            return Err(crate::error::YoloRouterError::RequestError(format!(
+                "GitHub Copilot API error {}: {}",
+                status, body
+            )));
+        }
+
+        Ok(response)
+    }
+    
+    fn supports_streaming(&self) -> bool {
+        true
     }
 
     fn name(&self) -> &str {

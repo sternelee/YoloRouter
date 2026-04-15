@@ -4,10 +4,10 @@
 
 [![Rust](https://img.shields.io/badge/Rust-1.70%2B-orange.svg)](https://www.rust-lang.org/)
 [![License](https://img.shields.io/badge/License-MIT-blue.svg)](LICENSE)
-[![Tests](https://img.shields.io/badge/Tests-54%2F54-brightgreen.svg)]()
+[![Tests](https://img.shields.io/badge/Tests-65%2F65-brightgreen.svg)]()
 [![Build](https://img.shields.io/badge/Build-Passing-brightgreen.svg)]()
 [![Analyzer](https://img.shields.io/badge/Analyzer-%3C1ms-brightgreen.svg)]()
-
+[![Streaming](https://img.shields.io/badge/Streaming-All%20Endpoints-brightgreen.svg)]()
 ## Overview
 
 YoloRouter is a powerful AI model routing proxy that allows you to:
@@ -264,6 +264,55 @@ YoloRouter includes FastAnalyzer that analyzes requests in **< 1ms** across 15 d
 15. **General Knowledge** - Knowledge-intensive task needs
 
 **Advantage**: Compared to hardcoded routing, dynamic model selection can save **40% cost** while improving response quality.
+
+### 🌊 Universal Streaming Support
+
+All proxy endpoints now support **Server-Sent Events (SSE)** for real-time streaming responses:
+
+```bash
+# Anthropic streaming with auto-selection
+curl -X POST http://localhost:8989/v1/anthropic \
+  -H "Content-Type: application/json" \
+  -d '{
+    "model": "auto",
+    "messages": [{"role": "user", "content": "Explain quantum computing"}],
+    "stream": true
+  }' -N
+
+# OpenAI streaming
+curl -X POST http://localhost:8989/v1/openai \
+  -H "Content-Type: application/json" \
+  -d '{
+    "model": "gpt-4",
+    "messages": [{"role": "user", "content": "Hello"}],
+    "stream": true
+  }' -N
+
+# Direct routing with streaming
+curl -X POST http://localhost:8989/v1/auto \
+  -H "Content-Type: application/json" \
+  -d '{
+    "model": "openai:gpt-4",
+    "messages": [{"role": "user", "content": "Test"}],
+    "stream": true
+  }' -N
+```
+
+**Supported endpoints**:
+- ✅ `/v1/anthropic` - Anthropic native SSE format
+- ✅ `/v1/openai` - OpenAI SSE format
+- ✅ `/v1/gemini` - OpenAI-compatible SSE
+- ✅ `/v1/codex` - OpenAI SSE format
+- ✅ `/v1/github` - OpenAI SSE format
+- ✅ `/v1/auto` - Format depends on selected provider
+
+**Features**:
+- 🚀 Low latency - responses start immediately
+- 🎯 Auto-selection works with streaming (`model="auto"`)
+- 📦 Zero-copy forwarding - minimal memory overhead
+- 🔄 Provider-specific formats preserved for compatibility
+
+See [STREAMING_SUPPORT.md](STREAMING_SUPPORT.md) for detailed documentation.
 
 ### 📊 Monitoring and Statistics
 

@@ -18,7 +18,11 @@ serde_json = "1.0"
 toml = "0.8"
 
 # HTTP client
-reqwest = { version = "0.11", features = ["json"] }
+reqwest = { version = "0.11", features = ["json", "stream"] }
+
+# Streams
+bytes = "1.8"
+futures-util = "0.3"
 
 # Authentication
 oauth2 = "4.4"

@@ -1,5 +1,110 @@
 # Code Review Fixes - Implementation Summary
 
+## ⚡ 最新修复 (2024-04-15): GitHub Copilot & Codex OAuth 流式支持
+
+### 问题 1: Provider 不支持流式
+使用 `github_copilot:gpt-5.4` 模型时出现错误：
+```
+Provider 'github_copilot' does not support streaming
+```
+
+**根本原因**:
+- GitHub Copilot provider 缺少 `start_streaming_request()` 实现
+- Codex OAuth provider 缺少流式支持方法
+- `supports_streaming()` 返回默认值 false
+
+**修复**: 添加流式支持方法 ✅
+
+---
+
+### 问题 2: max_tokens 参数不兼容
+出现错误：
+```
+GitHub Copilot API error 400: Unsupported parameter: 'max_tokens' is not supported with this model. Use 'max_completion_tokens' instead.
+```
+
+**根本原因**: GitHub Copilot API 使用 `max_completion_tokens` 而不是标准的 `max_tokens`
+
+**修复**: 
+**文件**: `src/provider/github_copilot.rs`
+
+将两处 `max_tokens` 改为 `max_completion_tokens`:
+
+```rust
+// send_request() - L250
+let payload = json!({
+    "model": model,
+    "messages": request.messages,
+    "temperature": request.temperature.unwrap_or(0.7),
+    "max_completion_tokens": request.max_tokens.unwrap_or(4096),  // ← 改为 max_completion_tokens
+    "stream": false
+});
+
+// start_streaming_request() - L327
+let payload = json!({
+    "model": model,
+    "messages": request.messages,
+    "temperature": request.temperature.unwrap_or(0.7),
+    "max_completion_tokens": request.max_tokens.unwrap_or(4096),  // ← 改为 max_completion_tokens
+    "stream": true
+});
+```
+
+**测试结果**: ✅ 65/65 tests passing, 服务器已重启
+
+---
+
+## ⚡ 最新修复 (2024-04-15): GitHub Copilot & Codex OAuth 流式支持
+
+### 问题
+使用 `github_copilot:gpt-5.4` 模型时出现错误：
+```
+Provider 'github_copilot' does not support streaming
+```
+
+### 根本原因
+- GitHub Copilot provider 缺少 `start_streaming_request()` 实现
+- Codex OAuth provider 缺少流式支持方法
+- `supports_streaming()` 返回默认值 false
+
+### 修复
+**文件**: `src/provider/github_copilot.rs`, `src/provider/codex_oauth.rs`
+
+为两个 provider 添加：
+1. `async fn start_streaming_request()` - 发起 SSE 流式请求
+2. `fn supports_streaming() -> bool` - 返回 true
+
+**关键实现**:
+```rust
+// GitHub Copilot
+async fn start_streaming_request(&self, request: &ChatRequest) -> Result<reqwest::Response> {
+    let copilot_token = self.get_copilot_token().await?;
+    let payload = json!({
+        "model": request.model,
+        "messages": request.messages,
+        "stream": true  // ← 启用流式
+    });
+    
+    let response = self.client.post(COPILOT_CHAT_URL)
+        .header("Authorization", format!("Bearer {}", copilot_token))
+        .header("Accept", "text/event-stream")  // ← SSE 格式
+        .json(&payload)
+        .send()
+        .await?;
+    
+    Ok(response)
+}
+
+fn supports_streaming(&self) -> bool { true }
+```
+
+### 测试结果
+✅ 65/65 tests passing  
+✅ `cargo build --release` 成功  
+✅ 服务器运行正常
+
+---
+
 ## Overview
 This document summarizes the implementation of all 5 critical issues identified in the code review, plus the addition of the 15-dimensional analyzer module.
 

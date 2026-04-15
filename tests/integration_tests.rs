@@ -1,6 +1,7 @@
 #[cfg(test)]
 mod integration_tests {
-    use yolo_router::{ChatMessage, ChatRequest, Config};
+    use serde_json::json;
+    use yolo_router::{AnthropicRequest, ChatMessage, ChatRequest, Config};
 
     #[test]
     fn test_config_round_trip() {
@@ -53,6 +54,7 @@ retry_count = 2
             temperature: Some(0.7),
             top_p: None,
             system: None,
+            anthropic: None,
         };
 
         assert_eq!(request.model, "claude-opus");
@@ -174,6 +176,31 @@ fallback_enabled = true
         let daemon = config.daemon();
         assert_eq!(daemon.port, 8989);
         assert_eq!(daemon.log_level, "debug");
+    }
+
+    #[test]
+    fn test_anthropic_request_preserves_tools_and_blocks() {
+        let request: AnthropicRequest = serde_json::from_value(json!({
+            "model": "claude-sonnet-4-5",
+            "messages": [{
+                "role": "user",
+                "content": [
+                    {"type": "text", "text": "Hello!"},
+                    {"type": "image", "source": {"type": "base64", "media_type": "image/png", "data": "abc"}}
+                ]
+            }],
+            "system": [{"type": "text", "text": "You are helpful"}],
+            "tools": [{"name": "Read", "input_schema": {"type": "object"}}],
+            "tool_choice": {"type": "auto"}
+        }))
+        .expect("Claude-style payload should deserialize");
+
+        let chat_request = ChatRequest::from(request.clone());
+        assert!(chat_request.requires_tools());
+        assert!(chat_request.requires_vision());
+        assert!(chat_request.messages[0].content.contains("Hello!"));
+        assert!(chat_request.messages[0].content.contains("image:"));
+        assert_eq!(chat_request.anthropic, Some(request));
     }
 
     #[test]

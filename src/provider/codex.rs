@@ -133,6 +133,8 @@ impl Provider for CodexProvider {
                 completion_tokens: data["usage"]["completion_tokens"].as_u64().unwrap_or(0) as u32,
                 total_tokens: data["usage"]["total_tokens"].as_u64().unwrap_or(0) as u32,
             },
+            anthropic_content: None,
+            anthropic_stop_sequence: None,
         })
     }
 

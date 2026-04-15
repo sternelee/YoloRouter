@@ -31,6 +31,17 @@ impl Router {
         engine.route(request, scenario).await
     }
 
+    /// Select the best model for a request without executing it.
+    /// Returns (provider_name, model_name).
+    pub async fn select_best_model(
+        &self,
+        request: &ChatRequest,
+        scenario: Option<&str>,
+    ) -> Result<(String, String)> {
+        let engine = self.engine.read().await;
+        engine.select_best_model(request, scenario).await
+    }
+
     pub async fn reload(&self, config: &Config) -> Result<()> {
         let new_engine = RoutingEngine::new_with_config(config.clone())?;
         *self.engine.write().await = new_engine;

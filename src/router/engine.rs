@@ -155,6 +155,93 @@ impl RoutingEngine {
         ))
     }
 
+    /// Select the best model for a request without executing it.
+    /// Returns (provider_name, model_name) for the selected model.
+    pub async fn select_best_model(
+        &self,
+        request: &ChatRequest,
+        scenario: Option<&str>,
+    ) -> Result<(String, String)> {
+        let config = self.config.read().await;
+        let routing_config = config.routing();
+
+        // Explicit scenario wins immediately
+        if let Some(scenario_name) = scenario {
+            if let Ok(scenario_config) = config.get_scenario(scenario_name) {
+                if let Some(model_config) = scenario_config.models.first() {
+                    return Ok((model_config.provider.clone(), model_config.model.clone()));
+                }
+            }
+        }
+
+        // Direct routing: "provider:model" format
+        if request.model != "auto" {
+            let model_parts: Vec<&str> = request.model.split(':').collect();
+            if model_parts.len() == 2 {
+                let provider_name = model_parts[0];
+                if self.registry.get(provider_name).is_some() {
+                    return Ok((provider_name.to_string(), model_parts[1].to_string()));
+                }
+            }
+        }
+
+        // Auto-routing via analyzer
+        let scenarios = config.scenarios();
+        if !scenarios.is_empty() {
+            let candidates: Vec<ModelCandidate> = scenarios
+                .values()
+                .flat_map(|sc| {
+                    sc.models.iter().map(|m| ModelCandidate {
+                        id: format!("{}/{}", m.provider, m.model),
+                        provider: m.provider.clone(),
+                        model: m.model.clone(),
+                        capabilities: m.capabilities.clone().unwrap_or_default(),
+                        cost_tier: m.cost_tier.clone().unwrap_or_else(|| "medium".to_string()),
+                    })
+                })
+                .collect();
+
+            let (analysis, _scores) = self
+                .analyzer
+                .analyze_and_score(&request.messages, &candidates);
+
+            let scenario_data: Vec<ScenarioMeta<'_>> = scenarios
+                .iter()
+                .map(|(name, sc)| {
+                    (
+                        name.as_str(),
+                        sc.match_task_types.as_slice(),
+                        sc.match_languages.as_slice(),
+                        sc.priority,
+                        sc.is_default,
+                    )
+                })
+                .collect();
+
+            if let Some(scenario_name) = match_scenario(
+                &analysis,
+                &scenario_data,
+                routing_config.confidence_threshold,
+            ) {
+                if let Ok(scenario_config) = config.get_scenario(&scenario_name) {
+                    if let Some(model_config) = scenario_config.models.first() {
+                        return Ok((model_config.provider.clone(), model_config.model.clone()));
+                    }
+                }
+            }
+        }
+
+        // Last resort: first available provider with a default model
+        if let Some((name, _)) = self.registry.list().first().map(|n| (n.clone(), ())) {
+            // Return the provider name and "auto" - let the provider decide
+            return Ok((name.clone(), "auto".to_string()));
+        }
+
+        Err(crate::error::YoloRouterError::RoutingError(
+            "No provider available for model selection".to_string(),
+        ))
+    }
+
     async fn route_via_scenario(
         &self,
         request: &ChatRequest,

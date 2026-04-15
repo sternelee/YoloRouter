@@ -35,6 +35,9 @@ pub enum YoloRouterError {
 
     #[error("Timeout error: {0}")]
     TimeoutError(String),
+    
+    #[error("Not implemented: {0}")]
+    NotImplemented(String),
 
     #[error("Unknown error: {0}")]
     Unknown(String),
@@ -50,6 +53,7 @@ impl ResponseError for YoloRouterError {
             Self::RoutingError(_) => StatusCode::SERVICE_UNAVAILABLE,
             Self::AllProvidersFailed(_) => StatusCode::SERVICE_UNAVAILABLE,
             Self::TimeoutError(_) => StatusCode::GATEWAY_TIMEOUT,
+            Self::NotImplemented(_) => StatusCode::NOT_IMPLEMENTED,
             _ => StatusCode::INTERNAL_SERVER_ERROR,
         }
     }

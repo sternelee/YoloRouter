@@ -2,94 +2,85 @@
 port = 8989
 log_level = "info"
 
-# ─── Provider Configuration ───────────────────────────────────────────────────
-# api_key supports ${ENV_VAR} expansion
+# ─── Providers ────────────────────────────────────────────────────────────────
+# OAuth providers: token files auto-loaded after running --auth flow once.
+# OpenAI-compatible providers: api_key supports ${ENV_VAR} expansion.
 
-# ── Free / cheap models via OpenRouter ──────────────────────────────────────
-# Sign up at https://openrouter.ai and set OPENROUTER_API_KEY
+# GitHub Copilot Pro+ — tokens stored in ~/.config/yolo-router/github_token
+# Setup: yolo-router --auth github
+[providers.github_copilot]
+type = "github_copilot"
+
+# Codex Plus (ChatGPT Pro) — tokens stored in ~/.config/yolo-router/codex_oauth.json
+# Setup: yolo-router --auth codex
+[providers.codex_oauth]
+type = "codex_oauth"
+
+# OpenRouter — 100+ models, many :free tiers
+# Docs: https://openrouter.ai/docs
+# Free models: nvidia/nemotron-3-super-120b-a12b:free, openai/gpt-oss-120b:free, minimax/minimax-m2.5:free, google/gemma-4-31b-it:free, qwen/qwen3-coder:free etc.
 [providers.openrouter]
 type = "openai"
 base_url = "https://openrouter.ai/api/v1"
 api_key = "${OPENROUTER_API_KEY}"
 
-# ── GitHub Copilot (free with Pro subscription) ───────────────────────────
-# Run: yolo-router --auth github
-# Token auto-loaded from ~/.config/yolo-router/github_token
-[providers.github_copilot]
-type = "github_copilot"
-# token is optional here — loaded from disk after --auth github
-# token = "${GITHUB_COPILOT_TOKEN}"
-
-# ── ChatGPT Pro via Codex OAuth (free with ChatGPT Pro subscription) ──────
-# Run: yolo-router --auth codex
-# Tokens auto-loaded from ~/.config/yolo-router/codex_oauth.json
-[providers.codex_oauth]
-type = "codex_oauth"
-# (no api_key needed — tokens loaded from disk after --auth codex)
-
-# ── Paid API providers (optional fallbacks) ───────────────────────────────
-[providers.anthropic]
-type = "anthropic"
-api_key = "${ANTHROPIC_API_KEY}"
-
-[providers.openai]
+# NVIDIA NIM — free inference credits for many models
+# Docs: https://integrate.api.nvidia.com
+# Free Endpoint: minimax-m2.7, step-3.5-flash, glm-4.7, deepseek-v3.2, kimi-k2-thinking etc.
+[providers.nvidia]
 type = "openai"
-api_key = "${OPENAI_API_KEY}"
-
-[providers.gemini]
-type = "gemini"
-api_key = "${GEMINI_API_KEY}"
+base_url = "https://integrate.api.nvidia.com/v1"
+api_key = "${NVIDIA_API_KEY}"
 
 # ─── Scenarios ────────────────────────────────────────────────────────────────
-# Each scenario matches requests by task type + language, then tries models in
-# order with automatic fallback.
+# Routing priority (highest wins when multiple match):
+#   coding(100) > reasoning(90) > chinese(80) > general(50, default)
 #
-# match_task_types: ["coding","reasoning","analysis","translation","creative","general"]
-# match_languages:  ["latin","cjk","code","mixed"]  (empty = match any)
-# priority:         higher = preferred when multiple scenarios match
-# is_default:       true = use when no other scenario matches
+# cost_tier "low"  = tried first (subscription / free quota)
+# cost_tier "high" = fallback only (metered / expensive)
 #
-# TUI override: yolo-router --tui → Scenarios tab → Enter to pin a scenario
+# Direct routing: set model = "github_copilot:claude-sonnet-4.6" in any client
+# to bypass scenario selection entirely.
 
-# ── Coding: GitHub Copilot → Codex → paid fallbacks ───────────────────────
+# ── Coding ────────────────────────────────────────────────────────────────────
 [scenarios.coding]
 default_tier = "low"
 match_task_types = ["coding"]
-match_languages = []          # match any language
+match_languages = []
 priority = 100
 is_default = false
 
 [[scenarios.coding.models]]
 provider = "github_copilot"
-model = "claude-sonnet-4-6"                              # Claude Sonnet 4.6 via Copilot Pro
+model = "claude-sonnet-4.6"                              # Best all-round coder via Copilot Pro+
 cost_tier = "low"
 capabilities = ["code", "reasoning", "complex-problems"]
 
 [[scenarios.coding.models]]
+provider = "codex_oauth"
+model = "gpt-5.3-codex"              # Coding-specialist frontier model via Codex Plus
+cost_tier = "low"
+capabilities = ["code", "reasoning"]
+
+[[scenarios.coding.models]]
 provider = "github_copilot"
-model = "gpt-4o"                     # GPT-4o via Copilot Pro
+model = "gpt-5.4"                    # Latest GPT-5 frontier via Copilot Pro+
 cost_tier = "low"
 capabilities = ["code", "reasoning"]
 
 [[scenarios.coding.models]]
 provider = "codex_oauth"
-model = "gpt-5.4"                    # GPT-5.4 via ChatGPT Pro subscription
+model = "gpt-5.4"                    # Latest GPT-5 frontier via Codex Plus
 cost_tier = "low"
 capabilities = ["code", "reasoning"]
 
 [[scenarios.coding.models]]
-provider = "codex_oauth"
-model = "codex-davinci-002" # Codex classic (fallback)
-cost_tier = "low"
-capabilities = ["code"]
-
-[[scenarios.coding.models]]
-provider = "anthropic"
-model = "claude-opus-4-5"                                # Paid fallback if subscriptions unavailable
+provider = "github_copilot"
+model = "claude-opus-4.6"                                # Highest quality — only if lower tiers fail
 cost_tier = "high"
-capabilities = ["reasoning", "code", "complex-problems"]
+capabilities = ["code", "reasoning", "complex-problems"]
 
-# ── Reasoning / analysis: prefer premium models ───────────────────────────
+# ── Reasoning / Analysis ──────────────────────────────────────────────────────
 [scenarios.reasoning]
 default_tier = "low"
 match_task_types = ["reasoning", "analysis"]
@@ -99,7 +90,7 @@ is_default = false
 
 [[scenarios.reasoning.models]]
 provider = "github_copilot"
-model = "claude-sonnet-4-6"
+model = "claude-sonnet-4.6"
 cost_tier = "low"
 capabilities = ["reasoning", "analysis"]
 
@@ -109,72 +100,42 @@ model = "gpt-5.4"
 cost_tier = "low"
 capabilities = ["reasoning"]
 
-[[scenarios.reasoning.models]]
-provider = "openrouter"
-model = "deepseek/deepseek-r1:free"
-cost_tier = "low"
-capabilities = ["reasoning"]
-
-# ── CJK / Chinese requests ────────────────────────────────────────────────
+# ── CJK / Chinese ─────────────────────────────────────────────────────────────
 [scenarios.chinese]
 default_tier = "low"
-match_task_types = []     # match any task
-match_languages = ["cjk"] # Chinese/Japanese/Korean requests
+match_task_types = []     # any task type, trigger on language only
+match_languages = ["cjk"]
 priority = 80
 is_default = false
 
 [[scenarios.chinese.models]]
 provider = "github_copilot"
-model = "claude-sonnet-4-6"
+model = "claude-sonnet-4.6"
 cost_tier = "low"
 capabilities = ["multilingual", "reasoning"]
 
-[[scenarios.chinese.models]]
-provider = "openrouter"
-model = "qwen/qwen-2.5-72b-instruct:free"
-cost_tier = "low"
-capabilities = ["multilingual", "cjk"]
-
-[[scenarios.chinese.models]]
-provider = "gemini"
-model = "gemini-2.0-flash"
-cost_tier = "low"
-capabilities = ["multilingual"]
-
-# ── General / simple tasks: free OpenRouter models ────────────────────────
+# ── General / Creative / Translation (default) ────────────────────────────────
 [scenarios.general]
 default_tier = "low"
 match_task_types = ["general", "creative", "translation"]
 match_languages = []
 priority = 50
-is_default = true                                         # fallback when no other scenario matches
+is_default = true                                         # catch-all when no other scenario matches
 
 [[scenarios.general.models]]
-provider = "openrouter"
-model = "meta-llama/llama-3.1-8b-instruct:free"
+provider = "github_copilot"
+model = "claude-haiku-4.5"  # Lightweight Haiku-4.5 via Copilot Pro+
 cost_tier = "low"
 
 [[scenarios.general.models]]
-provider = "openrouter"
-model = "mistralai/mistral-7b-instruct:free"
+provider = "codex_oauth"
+model = "gpt-5.4-mini"   # Lightweight GPT-5 via Codex Plus
 cost_tier = "low"
 
-[[scenarios.general.models]]
-provider = "openrouter"
-model = "google/gemma-2-9b-it:free"
-cost_tier = "low"
-
-[[scenarios.general.models]]
-provider = "github_copilot" # Copilot as last-resort if OpenRouter quota hit
-model = "gpt-4o-mini"
-cost_tier = "low"
-
-# ─── Routing ─────────────────────────────────────────────────────────────────
+# ─── Routing ──────────────────────────────────────────────────────────────────
 
 [routing]
 fallback_enabled = true
 timeout_ms = 30000
 retry_count = 2
-# Minimum analyzer confidence to use auto-routing (0.0–1.0)
-# Below this threshold, the default scenario is used instead
 confidence_threshold = 0.6

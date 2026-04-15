@@ -524,7 +524,52 @@ impl Provider for CodexOAuthProvider {
                 completion_tokens: data["usage"]["completion_tokens"].as_u64().unwrap_or(0) as u32,
                 total_tokens: data["usage"]["total_tokens"].as_u64().unwrap_or(0) as u32,
             },
+            anthropic_content: None,
+            anthropic_stop_sequence: None,
         })
+    }
+    
+    async fn start_streaming_request(&self, request: &ChatRequest) -> Result<reqwest::Response> {
+        let token = self.get_valid_token().await?;
+
+        let model = if request.model.is_empty() || request.model == "auto" {
+            "gpt-4o".to_string()
+        } else {
+            request.model.clone()
+        };
+
+        let payload = json!({
+            "model": model,
+            "messages": request.messages,
+            "temperature": request.temperature.unwrap_or(0.7),
+            "max_tokens": request.max_tokens.unwrap_or(4096),
+            "stream": true
+        });
+
+        let response = self
+            .client
+            .post("https://api.openai.com/v1/chat/completions")
+            .header("Authorization", format!("Bearer {}", token))
+            .header("Content-Type", "application/json")
+            .header("Accept", "text/event-stream")
+            .json(&payload)
+            .send()
+            .await
+            .map_err(crate::error::YoloRouterError::HttpError)?;
+
+        if !response.status().is_success() {
+            let status = response.status();
+            let body = response.text().await.unwrap_or_default();
+            return Err(crate::error::YoloRouterError::RequestError(format!(
+                "Codex OAuth API error {status}: {body}"
+            )));
+        }
+
+        Ok(response)
+    }
+    
+    fn supports_streaming(&self) -> bool {
+        true
     }
 
     fn name(&self) -> &str {
