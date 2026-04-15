@@ -69,6 +69,8 @@ impl Config {
             timeout_ms: 30000,
             retry_count: 2,
             confidence_threshold: 0.6,
+            cooldown_enabled: true,
+            cooldown_secs: 60,
         })
     }
 
@@ -384,5 +386,47 @@ fallback_enabled = true
         let toml_str = cfg.to_string().unwrap();
         let reloaded = Config::from_string(&toml_str).unwrap();
         assert_eq!(reloaded.scenarios()["coding"].models.len(), 2);
+    }
+
+    #[test]
+    fn test_routing_config_cooldown_defaults() {
+        let config = Config::from_string(
+            r#"
+[routing]
+fallback_enabled = true
+"#,
+        )
+        .unwrap();
+        let routing = config.routing();
+        assert!(routing.cooldown_enabled);
+        assert_eq!(routing.cooldown_secs, 60);
+    }
+
+    #[test]
+    fn test_routing_config_cooldown_custom() {
+        let config = Config::from_string(
+            r#"
+[routing]
+cooldown_enabled = false
+cooldown_secs = 120
+"#,
+        )
+        .unwrap();
+        let routing = config.routing();
+        assert!(!routing.cooldown_enabled);
+        assert_eq!(routing.cooldown_secs, 120);
+    }
+
+    #[test]
+    fn test_routing_config_cooldown_zero_disables() {
+        let config = Config::from_string(
+            r#"
+[routing]
+cooldown_secs = 0
+"#,
+        )
+        .unwrap();
+        let routing = config.routing();
+        assert_eq!(routing.cooldown_secs, 0);
     }
 }

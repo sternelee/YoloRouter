@@ -70,6 +70,12 @@ pub mod schema {
         /// Minimum analyzer confidence to use auto-routing (0.0–1.0)
         #[serde(default = "default_confidence_threshold")]
         pub confidence_threshold: f32,
+        /// Enable provider cooldown after failure
+        #[serde(default = "default_cooldown_enabled")]
+        pub cooldown_enabled: bool,
+        /// Cooldown duration in seconds after a provider failure
+        #[serde(default = "default_cooldown_secs")]
+        pub cooldown_secs: u64,
     }
 
     fn default_timeout() -> u64 {
@@ -78,5 +84,13 @@ pub mod schema {
 
     fn default_confidence_threshold() -> f32 {
         0.6
+    }
+
+    fn default_cooldown_enabled() -> bool {
+        true
+    }
+
+    fn default_cooldown_secs() -> u64 {
+        60
     }
 }
