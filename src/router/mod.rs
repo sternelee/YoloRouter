@@ -8,8 +8,10 @@ use tokio::sync::RwLock;
 
 pub mod engine;
 pub mod fallback;
+pub mod health;
 pub use engine::RoutingEngine;
 pub use fallback::FallbackChain;
+pub use health::ProviderHealthTracker;
 
 pub struct Router {
     engine: RwLock<RoutingEngine>,
