@@ -70,7 +70,7 @@ impl Config {
             retry_count: 2,
             confidence_threshold: 0.6,
             cooldown_enabled: true,
-            cooldown_secs: 60,
+            cooldown_secs: 10800,
         })
     }
 
@@ -399,7 +399,7 @@ fallback_enabled = true
         .unwrap();
         let routing = config.routing();
         assert!(routing.cooldown_enabled);
-        assert_eq!(routing.cooldown_secs, 60);
+        assert_eq!(routing.cooldown_secs, 10800);
     }
 
     #[test]

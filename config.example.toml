@@ -141,4 +141,4 @@ retry_count = 2
 confidence_threshold = 0.6
 # Skip a failed provider for this many seconds before retrying it (0 = disabled)
 cooldown_enabled = true
-cooldown_secs = 60
+cooldown_secs = 10800

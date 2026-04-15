@@ -91,6 +91,6 @@ pub mod schema {
     }
 
     fn default_cooldown_secs() -> u64 {
-        60
+        10800 // 3 hours
     }
 }
