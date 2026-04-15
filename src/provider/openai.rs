@@ -24,7 +24,7 @@ impl OpenAIProvider {
         self.base_url = base_url;
         self
     }
-    
+
     fn build_payload(&self, request: &ChatRequest, stream: bool) -> Value {
         json!({
             "model": request.model,
@@ -90,11 +90,11 @@ impl Provider for OpenAIProvider {
             anthropic_stop_sequence: None,
         })
     }
-    
+
     async fn start_streaming_request(&self, request: &ChatRequest) -> Result<Response> {
         let url = format!("{}/chat/completions", self.base_url);
         let payload = self.build_payload(request, true);
-        
+
         let response = self
             .client
             .post(&url)
@@ -118,7 +118,7 @@ impl Provider for OpenAIProvider {
 
         Ok(response)
     }
-    
+
     fn supports_streaming(&self) -> bool {
         true
     }

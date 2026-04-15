@@ -528,7 +528,7 @@ impl Provider for CodexOAuthProvider {
             anthropic_stop_sequence: None,
         })
     }
-    
+
     async fn start_streaming_request(&self, request: &ChatRequest) -> Result<reqwest::Response> {
         let token = self.get_valid_token().await?;
 
@@ -567,7 +567,7 @@ impl Provider for CodexOAuthProvider {
 
         Ok(response)
     }
-    
+
     fn supports_streaming(&self) -> bool {
         true
     }

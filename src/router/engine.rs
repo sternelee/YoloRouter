@@ -262,7 +262,13 @@ impl RoutingEngine {
                 let fallback = FallbackChain::new(scenario_config);
                 return timeout(
                     timeout_duration,
-                    fallback.execute(request, &self.registry, routing_config.retry_count, tracker, cooldown),
+                    fallback.execute(
+                        request,
+                        &self.registry,
+                        routing_config.retry_count,
+                        tracker,
+                        cooldown,
+                    ),
                 )
                 .await
                 .map_err(|_| {

@@ -35,7 +35,7 @@ pub enum YoloRouterError {
 
     #[error("Timeout error: {0}")]
     TimeoutError(String),
-    
+
     #[error("Not implemented: {0}")]
     NotImplemented(String),
 

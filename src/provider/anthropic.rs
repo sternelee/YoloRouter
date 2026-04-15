@@ -1,7 +1,6 @@
 use super::Provider;
 use crate::models::{
-    AnthropicContentBlock, AnthropicRequest, ChatMessage, ChatRequest, ChatResponse, Choice,
-    Usage,
+    AnthropicContentBlock, AnthropicRequest, ChatMessage, ChatRequest, ChatResponse, Choice, Usage,
 };
 use crate::Result;
 use async_trait::async_trait;
@@ -239,7 +238,9 @@ impl Provider for AnthropicProvider {
         let content_blocks = Self::parse_content_blocks(&data);
         let content = Self::extract_text_content(&content_blocks);
         let stop_reason = data["stop_reason"].as_str().unwrap_or("stop").to_string();
-        let stop_sequence = data["stop_sequence"].as_str().map(|value| value.to_string());
+        let stop_sequence = data["stop_sequence"]
+            .as_str()
+            .map(|value| value.to_string());
 
         Ok(ChatResponse {
             id: data["id"]
@@ -262,7 +263,8 @@ impl Provider for AnthropicProvider {
                 prompt_tokens: data["usage"]["input_tokens"].as_u64().unwrap_or(0) as u32,
                 completion_tokens: data["usage"]["output_tokens"].as_u64().unwrap_or(0) as u32,
                 total_tokens: (data["usage"]["input_tokens"].as_u64().unwrap_or(0)
-                    + data["usage"]["output_tokens"].as_u64().unwrap_or(0)) as u32,
+                    + data["usage"]["output_tokens"].as_u64().unwrap_or(0))
+                    as u32,
             },
             anthropic_content: Some(content_blocks),
             anthropic_stop_sequence: stop_sequence,
@@ -280,11 +282,11 @@ impl Provider for AnthropicProvider {
             "claude-haiku".to_string(),
         ]
     }
-    
+
     async fn start_streaming_request(&self, request: &ChatRequest) -> Result<Response> {
         self.start_streaming_request(request).await
     }
-    
+
     fn supports_streaming(&self) -> bool {
         true
     }
@@ -328,8 +330,7 @@ mod tests {
                 betas: Some(AnthropicBetas::Multiple(vec![
                     "fine-grained-tool-streaming-2025-05-14".to_string(),
                 ])),
-                extra: serde_json::from_value(json!({"container": {"id": "session-1"}}))
-                    .unwrap(),
+                extra: serde_json::from_value(json!({"container": {"id": "session-1"}})).unwrap(),
             }),
         };
 

@@ -310,7 +310,7 @@ impl Provider for GitHubCopilotProvider {
             anthropic_stop_sequence: None,
         })
     }
-    
+
     async fn start_streaming_request(&self, request: &ChatRequest) -> Result<reqwest::Response> {
         let copilot_token = self.get_copilot_token().await?;
 
@@ -355,7 +355,7 @@ impl Provider for GitHubCopilotProvider {
 
         Ok(response)
     }
-    
+
     fn supports_streaming(&self) -> bool {
         true
     }

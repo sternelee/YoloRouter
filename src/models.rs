@@ -256,15 +256,15 @@ impl AnthropicContent {
             AnthropicContent::Text(text) => {
                 text.contains("tool_call") || text.contains("function_call")
             }
-            AnthropicContent::Blocks(blocks) => blocks.iter().any(AnthropicContentBlock::is_tool_related),
+            AnthropicContent::Blocks(blocks) => {
+                blocks.iter().any(AnthropicContentBlock::is_tool_related)
+            }
         }
     }
 
     pub fn has_vision(&self) -> bool {
         match self {
-            AnthropicContent::Text(text) => {
-                text.contains("image:") || text.contains("data:image/")
-            }
+            AnthropicContent::Text(text) => text.contains("image:") || text.contains("data:image/"),
             AnthropicContent::Blocks(blocks) => {
                 blocks.iter().any(AnthropicContentBlock::is_vision_related)
             }
@@ -321,10 +321,9 @@ impl From<ChatResponse> for AnthropicResponse {
             .as_ref()
             .map(|c| map_finish_reason(&c.finish_reason))
             .unwrap_or_else(|| "end_turn".to_string());
-        let fallback_text = first_choice
-            .map(|c| c.message.content)
-            .unwrap_or_default();
-        let content = anthropic_content.unwrap_or_else(|| vec![AnthropicContentBlock::text(fallback_text)]);
+        let fallback_text = first_choice.map(|c| c.message.content).unwrap_or_default();
+        let content =
+            anthropic_content.unwrap_or_else(|| vec![AnthropicContentBlock::text(fallback_text)]);
 
         let response_id = if id.starts_with("msg_") {
             id
@@ -434,7 +433,10 @@ mod tests {
 
         assert!(req.requires_tools());
         assert!(req.requires_vision());
-        assert_eq!(req.extra.get("container"), Some(&json!({"id": "session-1"})));
+        assert_eq!(
+            req.extra.get("container"),
+            Some(&json!({"id": "session-1"}))
+        );
         assert!(matches!(req.system, Some(Value::Array(_))));
     }
 

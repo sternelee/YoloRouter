@@ -47,16 +47,16 @@ impl FallbackChain {
                 let mut req = request.clone();
                 req.model = model_config.model.clone();
 
-                // max_retries is honoured for non-cooldown paths (e.g. direct routing).
-                // With cooldown enabled, we break on first failure to avoid extending
-                // the cooldown timer unnecessarily.
-                let attempts = if cooldown.is_zero() {
+                // When cooldown is enabled, only attempt once — any failure starts cooldown
+                // and we move on to the next provider. When cooldown is disabled, honour
+                // max_retries for the same provider.
+                let max_attempts = if cooldown.is_zero() {
                     max_retries + 1
                 } else {
                     1
                 };
-
-                for attempt in 0..attempts {
+                let mut attempt = 0u32;
+                while attempt < max_attempts {
                     if attempt > 0 {
                         tracing::info!(
                             provider = %model_config.provider,
@@ -64,7 +64,6 @@ impl FallbackChain {
                             "Retrying provider"
                         );
                     }
-
                     match provider.send_request(&req).await {
                         Ok(response) => {
                             tracing::info!(
@@ -85,8 +84,7 @@ impl FallbackChain {
                                 "Provider failed, entering cooldown"
                             );
                             tracker.record_failure(&model_config.provider);
-                            // Break immediately — provider is now in cooldown
-                            break;
+                            attempt += 1;
                         }
                     }
                 }

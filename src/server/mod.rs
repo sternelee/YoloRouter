@@ -80,8 +80,9 @@ pub async fn start_server(port: u16, config: crate::Config, config_path: String)
                             "message": format!("Invalid JSON: {}", err_msg),
                             "type": "invalid_request_error"
                         }
-                    }))
-                ).into()
+                    })),
+                )
+                .into()
             });
 
         App::new()
@@ -292,18 +293,18 @@ fn streaming_target_is_supported(model: &str) -> bool {
     if model.is_empty() {
         return false;
     }
-    
+
     // "auto" is supported - we'll resolve it before streaming
     if model == "auto" {
         return true;
     }
-    
+
     // Reject known placeholder/invalid values
     let invalid_values = ["auth", "default", "placeholder"];
     if invalid_values.contains(&model) {
         return false;
     }
-    
+
     // Allow any provider:model format or direct model names
     true
 }
@@ -347,15 +348,19 @@ async fn proxy_generic_stream(
         stream = ?request.stream,
         "Received streaming request"
     );
-    
+
     let model = request.model.clone();
-    
+
     // Handle "auto" model: use router to select best model, then stream
     if model == "auto" {
         let scenario = resolve_scenario(&state.overrides, endpoint).await;
-        
+
         // Use router to determine the best model
-        match state.router.select_best_model(&request, scenario.as_deref()).await {
+        match state
+            .router
+            .select_best_model(&request, scenario.as_deref())
+            .await
+        {
             Ok((provider_name, selected_model)) => {
                 tracing::info!(
                     provider = provider_name,
@@ -364,14 +369,14 @@ async fn proxy_generic_stream(
                     scenario = ?scenario,
                     "Auto-selected model for streaming request"
                 );
-                
+
                 // Update request with selected model (use provider:model format)
                 request.model = if provider_name == endpoint {
                     selected_model
                 } else {
                     format!("{}:{}", provider_name, selected_model)
                 };
-                
+
                 // Recursively call with the concrete model
                 return Box::pin(proxy_generic_stream(state, request, endpoint)).await;
             }
@@ -385,7 +390,7 @@ async fn proxy_generic_stream(
             }
         }
     }
-    
+
     // Parse provider:model format
     let (provider_name, model_name) = if model.contains(':') {
         let parts: Vec<&str> = model.split(':').collect();
@@ -394,12 +399,15 @@ async fn proxy_generic_stream(
         // Use endpoint name as provider
         (endpoint.to_string(), model.clone())
     };
-    
+
     // Get the provider
     let config = state.config.read().await;
     let provider = match config.get_provider(&provider_name) {
         Ok(provider_config) => {
-            match crate::provider::ProviderFactory::create_provider(&provider_name, &provider_config) {
+            match crate::provider::ProviderFactory::create_provider(
+                &provider_name,
+                &provider_config,
+            ) {
                 Ok(p) => p,
                 Err(e) => {
                     return HttpResponse::ServiceUnavailable().json(serde_json::json!({
@@ -421,7 +429,7 @@ async fn proxy_generic_stream(
         }
     };
     drop(config);
-    
+
     // Check if provider supports streaming
     if !provider.supports_streaming() {
         return HttpResponse::BadRequest().json(serde_json::json!({
@@ -431,12 +439,12 @@ async fn proxy_generic_stream(
             }
         }));
     }
-    
+
     // Update request model to just the model name (without provider prefix)
     request.model = model_name.clone();
-    
+
     let start = std::time::Instant::now();
-    
+
     // Start streaming request
     match provider.start_streaming_request(&request).await {
         Ok(response) => {
@@ -445,11 +453,11 @@ async fn proxy_generic_stream(
                 .stats
                 .record_request(endpoint.to_string(), model_name, true, elapsed)
                 .await;
-            
+
             let byte_stream = response
                 .bytes_stream()
                 .map(|chunk| chunk.map_err(actix_web::error::ErrorBadGateway));
-            
+
             HttpResponse::Ok()
                 .insert_header((header::CONTENT_TYPE, "text/event-stream"))
                 .insert_header((header::CACHE_CONTROL, "no-cache"))
@@ -462,7 +470,7 @@ async fn proxy_generic_stream(
                 .stats
                 .record_request(endpoint.to_string(), model_name, false, elapsed)
                 .await;
-            
+
             HttpResponse::ServiceUnavailable().json(serde_json::json!({
                 "error": {
                     "message": e.to_string(),
@@ -478,20 +486,24 @@ async fn proxy_anthropic_stream(
     request: AnthropicRequest,
 ) -> HttpResponse {
     let model = request.model.clone();
-    
+
     // Handle provider:model format - forward to generic streaming proxy
     if model.contains(':') {
         let chat_req = streaming_chat_request(request);
         return proxy_generic_stream(state, chat_req, "anthropic").await;
     }
-    
+
     // Handle "auto" model: use router to select best model, then stream
     if model == "auto" {
         let chat_req = ChatRequest::from(request.clone());
         let scenario = resolve_scenario(&state.overrides, "anthropic").await;
-        
+
         // Use router to determine the best model
-        match state.router.select_best_model(&chat_req, scenario.as_deref()).await {
+        match state
+            .router
+            .select_best_model(&chat_req, scenario.as_deref())
+            .await
+        {
             Ok((provider_name, selected_model)) => {
                 tracing::info!(
                     provider = provider_name,
@@ -499,18 +511,18 @@ async fn proxy_anthropic_stream(
                     scenario = ?scenario,
                     "Auto-selected model for Anthropic streaming request"
                 );
-                
+
                 // If auto-selected a non-Anthropic provider, use generic streaming
                 if provider_name != "anthropic" {
                     let mut new_req = chat_req;
                     new_req.model = format!("{}:{}", provider_name, selected_model);
                     return proxy_generic_stream(state, new_req, "anthropic").await;
                 }
-                
+
                 // Create a new request with the selected model (Anthropic)
                 let mut streaming_request = request;
                 streaming_request.model = selected_model;
-                
+
                 // Recursively call with the concrete model
                 return Box::pin(proxy_anthropic_stream(state, streaming_request)).await;
             }
@@ -523,7 +535,7 @@ async fn proxy_anthropic_stream(
             }
         }
     }
-    
+
     // Validate explicit model name
     if !streaming_target_is_supported(&model) {
         return anthropic_error_response(
@@ -647,7 +659,7 @@ async fn openai_proxy(
     req: web::Json<ChatRequest>,
 ) -> Result<HttpResponse> {
     let request = req.into_inner();
-    
+
     if request.stream.unwrap_or(false) {
         Ok(proxy_generic_stream(&state, request, "openai").await)
     } else {
@@ -661,7 +673,7 @@ async fn gemini_proxy(
     req: web::Json<ChatRequest>,
 ) -> Result<HttpResponse> {
     let request = req.into_inner();
-    
+
     if request.stream.unwrap_or(false) {
         Ok(proxy_generic_stream(&state, request, "gemini").await)
     } else {
@@ -675,7 +687,7 @@ async fn codex_proxy(
     req: web::Json<ChatRequest>,
 ) -> Result<HttpResponse> {
     let request = req.into_inner();
-    
+
     if request.stream.unwrap_or(false) {
         Ok(proxy_generic_stream(&state, request, "codex").await)
     } else {
@@ -690,7 +702,7 @@ async fn auto_route(
     req: web::Json<ChatRequest>,
 ) -> Result<HttpResponse> {
     let request = req.into_inner();
-    
+
     if request.stream.unwrap_or(false) {
         Ok(proxy_generic_stream(&state, request, "auto").await)
     } else {
@@ -745,7 +757,9 @@ mod tests {
     use serde_json::json;
 
     fn test_state(config: Config) -> web::Data<AppState> {
-        let router = Arc::new(Router::new(RoutingEngine::new_with_config(config.clone()).unwrap()));
+        let router = Arc::new(Router::new(
+            RoutingEngine::new_with_config(config.clone()).unwrap(),
+        ));
         web::Data::new(AppState {
             config: Arc::new(RwLock::new(config)),
             router,
@@ -901,10 +915,15 @@ base_url = "http://127.0.0.1:9"
 
         let chat = ChatRequest::from(request.clone());
         assert!(chat.requires_tools());
-        let native = chat.anthropic.expect("native anthropic payload should be preserved");
+        let native = chat
+            .anthropic
+            .expect("native anthropic payload should be preserved");
         assert_eq!(native.tools, request.tools);
         assert_eq!(native.tool_choice, request.tool_choice);
-        assert!(matches!(native.messages[0].content, AnthropicContent::Blocks(_)));
+        assert!(matches!(
+            native.messages[0].content,
+            AnthropicContent::Blocks(_)
+        ));
         assert_eq!(request.messages[0].role, "user");
     }
 }

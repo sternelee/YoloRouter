@@ -151,7 +151,7 @@ fallback_enabled = true
         let config = Config::from_string(toml_str).expect("Failed to parse config");
 
         let routing = config.routing();
-        assert_eq!(routing.fallback_enabled, true);
+        assert!(routing.fallback_enabled);
         assert_eq!(routing.timeout_ms, 30000);
         // retry_count has no default, so it's 0
         assert_eq!(routing.retry_count, 0);
@@ -307,8 +307,7 @@ models = [{ provider = "openai", model = "gpt-4" }]
     #[test]
     fn test_cooldown_config_disabled() {
         let config =
-            Config::from_string("[routing]\ncooldown_enabled = false\ncooldown_secs = 0")
-                .unwrap();
+            Config::from_string("[routing]\ncooldown_enabled = false\ncooldown_secs = 0").unwrap();
         let routing = config.routing();
         assert!(!routing.cooldown_enabled);
         assert_eq!(routing.cooldown_secs, 0);

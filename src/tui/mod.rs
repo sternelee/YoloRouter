@@ -452,6 +452,7 @@ fn move_provider_selection(app: &mut TuiApp, delta: isize) {
 // ─── Provider tab view state ──────────────────────────────────────────────────
 
 impl TuiApp {
+    #[allow(clippy::too_many_arguments)]
     fn new(
         config: Config,
         config_path: String,
@@ -642,6 +643,7 @@ fn restore_terminal(terminal: &mut Terminal<CrosstermBackend<io::Stdout>>) {
 
 // ─── Main event loop ─────────────────────────────────────────────────────────
 
+#[allow(clippy::too_many_arguments)]
 fn run_tui(
     config: Config,
     config_path: String,

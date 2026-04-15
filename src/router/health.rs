@@ -118,7 +118,9 @@ mod tests {
         let tracker = ProviderHealthTracker::new();
         tracker.record_failure("openai");
         tracker.record_success("openai");
-        assert!(tracker.remaining("openai", Duration::from_secs(60)).is_none());
+        assert!(tracker
+            .remaining("openai", Duration::from_secs(60))
+            .is_none());
     }
 
     #[test]
