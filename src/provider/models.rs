@@ -1,4 +1,5 @@
 use crate::config::schema::ProviderConfig;
+use crate::provider::codex_oauth::{CodexOAuthProvider, CodexQuotaInfo, CodexQuotaWindow};
 
 static HTTP_CLIENT: std::sync::OnceLock<reqwest::Client> = std::sync::OnceLock::new();
 
@@ -68,6 +69,131 @@ pub async fn fetch_provider_models(cfg: &ProviderConfig) -> Result<Vec<String>, 
             }
             fetch_openai_compatible_models(base_url, api_key).await
         }
+    }
+}
+
+pub async fn fetch_provider_quota(cfg: &ProviderConfig) -> Result<CodexQuotaInfo, String> {
+    match cfg.provider_type.as_str() {
+        "codex_oauth" => build_codex_oauth_provider(cfg)
+            .fetch_usage(codex_oauth_account_id(cfg).as_deref())
+            .await
+            .map_err(|e| e.to_string()),
+        _ => Err("Quota lookup is only supported for codex_oauth providers".to_string()),
+    }
+}
+
+pub fn is_codex_oauth_provider(cfg: &ProviderConfig) -> bool {
+    cfg.provider_type == "codex_oauth"
+}
+
+pub fn codex_quota_ttl_ms() -> i64 {
+    5 * 60 * 1000
+}
+
+pub fn now_epoch_ms() -> i64 {
+    std::time::SystemTime::now()
+        .duration_since(std::time::UNIX_EPOCH)
+        .unwrap_or_default()
+        .as_millis() as i64
+}
+
+pub fn should_refresh_quota(last_queried_at_ms: Option<i64>, now_ms: i64, ttl_ms: i64) -> bool {
+    match last_queried_at_ms {
+        Some(last) => now_ms.saturating_sub(last) >= ttl_ms,
+        None => true,
+    }
+}
+
+pub fn codex_window_label(window_seconds: Option<i64>) -> String {
+    match window_seconds {
+        Some(18_000) => "5h window".to_string(),
+        Some(604_800) => "7d window".to_string(),
+        Some(secs) if secs % 86_400 == 0 => format!("{}d window", secs / 86_400),
+        Some(secs) if secs % 3_600 == 0 => format!("{}h window", secs / 3_600),
+        Some(secs) if secs >= 60 => format!("{}m window", secs / 60),
+        Some(secs) if secs > 0 => format!("{}s window", secs),
+        _ => "Usage window".to_string(),
+    }
+}
+
+pub fn format_reset_at(reset_at: Option<i64>, now_ms: i64) -> String {
+    match reset_at {
+        Some(ts) => {
+            let reset_ms = if ts > 1_000_000_000_000 {
+                ts
+            } else {
+                ts * 1000
+            };
+            let delta_secs = (reset_ms.saturating_sub(now_ms) / 1000).max(0);
+            if delta_secs >= 86_400 {
+                format!("in {}d", delta_secs / 86_400)
+            } else if delta_secs >= 3_600 {
+                format!("in {}h", delta_secs / 3_600)
+            } else if delta_secs >= 60 {
+                format!("in {}m", delta_secs / 60)
+            } else {
+                format!("in {}s", delta_secs)
+            }
+        }
+        None => "unknown".to_string(),
+    }
+}
+
+pub fn codex_quota_rows(quota: &CodexQuotaInfo, now_ms: i64) -> Vec<(String, String, String)> {
+    [
+        quota.rate_limit.primary_window.as_ref(),
+        quota.rate_limit.secondary_window.as_ref(),
+    ]
+    .into_iter()
+    .flatten()
+    .map(|window| codex_quota_row(window, now_ms))
+    .collect()
+}
+
+fn codex_quota_row(window: &CodexQuotaWindow, now_ms: i64) -> (String, String, String) {
+    (
+        codex_window_label(window.limit_window_seconds),
+        window
+            .used_percent
+            .map(|used| format!("{used:.1}% used"))
+            .unwrap_or_else(|| "usage unknown".to_string()),
+        format_reset_at(window.reset_at, now_ms),
+    )
+}
+
+fn codex_oauth_account_id(cfg: &ProviderConfig) -> Option<String> {
+    cfg.extra
+        .get("account_id")
+        .and_then(|value| value.as_str())
+        .map(str::to_string)
+        .filter(|value| !value.trim().is_empty())
+}
+
+fn codex_oauth_token_path(cfg: &ProviderConfig) -> Option<std::path::PathBuf> {
+    cfg.extra
+        .get("token_path")
+        .and_then(|value| value.as_str())
+        .map(std::path::PathBuf::from)
+        .or_else(|| dirs::config_dir().map(|dir| dir.join("yolo-router").join("codex_oauth.json")))
+}
+
+fn codex_oauth_refresh_token(cfg: &ProviderConfig) -> Option<String> {
+    cfg.extra
+        .get("refresh_token")
+        .and_then(|value| value.as_str())
+        .map(str::to_string)
+}
+
+fn build_codex_oauth_provider(cfg: &ProviderConfig) -> CodexOAuthProvider {
+    let token_path = codex_oauth_token_path(cfg);
+    if let Some(access_token) = cfg.api_key.clone().or(cfg.token.clone()) {
+        CodexOAuthProvider::with_access_token(
+            access_token,
+            codex_oauth_refresh_token(cfg),
+            token_path,
+        )
+    } else {
+        CodexOAuthProvider::new(token_path)
     }
 }
 
@@ -141,6 +267,7 @@ async fn fetch_gemini_models(api_key: &str) -> Result<Vec<String>, String> {
 #[cfg(test)]
 mod tests {
     use super::*;
+    use crate::provider::codex_oauth::CodexQuotaRateLimit;
     use std::collections::HashMap;
 
     fn make_cfg(
@@ -223,5 +350,50 @@ mod tests {
         assert!(models.contains(&"gpt-5.2-codex".to_string()));
         assert!(models.contains(&"claude-opus-4.5".to_string()));
         assert_eq!(models.len(), 14);
+    }
+
+    #[test]
+    fn test_should_refresh_quota_when_missing_or_stale() {
+        assert!(should_refresh_quota(None, 1_000, codex_quota_ttl_ms()));
+        assert!(!should_refresh_quota(Some(4_000), 10_000, 10_000));
+        assert!(should_refresh_quota(Some(0), 10_000, 10_000));
+    }
+
+    #[test]
+    fn test_codex_window_label_formats_known_windows() {
+        assert_eq!(codex_window_label(Some(18_000)), "5h window");
+        assert_eq!(codex_window_label(Some(604_800)), "7d window");
+        assert_eq!(codex_window_label(Some(7_200)), "2h window");
+    }
+
+    #[test]
+    fn test_codex_quota_rows_formats_usage_and_reset() {
+        let quota = CodexQuotaInfo {
+            rate_limit: CodexQuotaRateLimit {
+                primary_window: Some(CodexQuotaWindow {
+                    used_percent: Some(42.5),
+                    limit_window_seconds: Some(18_000),
+                    reset_at: Some(7_200),
+                }),
+                secondary_window: None,
+            },
+            queried_at_ms: 0,
+        };
+
+        let rows = codex_quota_rows(&quota, 0);
+        assert_eq!(rows.len(), 1);
+        assert_eq!(rows[0].0, "5h window");
+        assert_eq!(rows[0].1, "42.5% used");
+        assert_eq!(rows[0].2, "in 2h");
+    }
+
+    #[test]
+    fn test_is_codex_oauth_provider() {
+        assert!(is_codex_oauth_provider(&make_cfg(
+            "codex_oauth",
+            None,
+            None
+        )));
+        assert!(!is_codex_oauth_provider(&make_cfg("openai", None, None)));
     }
 }

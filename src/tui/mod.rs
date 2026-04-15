@@ -5,7 +5,12 @@ pub mod github_auth;
 
 pub use auth::AuthFlow;
 
-use crate::config::Config;
+use crate::config::{schema::ProviderConfig, Config};
+use crate::provider::codex_oauth::CodexQuotaInfo;
+use crate::provider::models::{
+    codex_quota_rows, codex_quota_ttl_ms, fetch_provider_quota, is_codex_oauth_provider,
+    now_epoch_ms, should_refresh_quota,
+};
 use crossterm::{
     event::{self, DisableMouseCapture, EnableMouseCapture, Event, KeyCode, KeyModifiers},
     execute,
@@ -19,6 +24,7 @@ use ratatui::{
     widgets::{Block, Borders, List, ListItem, ListState, Paragraph, Tabs},
     Terminal,
 };
+use std::collections::HashMap;
 use std::io;
 use std::sync::mpsc;
 use std::time::Duration;
@@ -75,8 +81,45 @@ pub enum ControlCommand {
 
 pub struct ModelFetchRequest {
     pub provider_name: String,
-    pub config: crate::config::schema::ProviderConfig,
+    pub config: ProviderConfig,
 }
+
+pub struct QuotaFetchRequest {
+    pub provider_name: String,
+    pub config: ProviderConfig,
+}
+
+#[derive(Debug, Clone)]
+enum ProviderQuotaState {
+    Loading,
+    Ready(CodexQuotaInfo),
+    Error(String),
+}
+
+const CODEX_QUOTA_REFRESH_KEY: char = 'r';
+const CODEX_QUOTA_LOADING_MESSAGE: &str = "Loading Codex quota…";
+const CODEX_QUOTA_EMPTY_MESSAGE: &str = "No quota windows returned";
+const CODEX_QUOTA_SECTION_TITLE: &str = "Quota / Usage";
+const CODEX_QUOTA_HELP_LINE: &str = "  Enter — fetch model list";
+const CODEX_QUOTA_REFRESH_LINE: &str = "  r — refresh quota";
+const PROVIDER_DETAIL_SELECT_MESSAGE: &str = "Select a provider";
+const PROVIDER_DETAIL_EMPTY_MESSAGE: &str = "No providers configured";
+const QUOTA_ERROR_PREFIX: &str = "Quota error: ";
+const QUOTA_UPDATED_PREFIX: &str = "Updated ";
+const QUOTA_UPDATED_JUST_NOW: &str = "just now";
+const QUOTA_UPDATED_MIN_SUFFIX: &str = "m ago";
+const QUOTA_ROW_SEPARATOR: &str = " • ";
+const DEFAULT_STATUS_MESSAGE: &str =
+    "Ready. Tab/Shift+Tab: switch tabs  |  Scenarios: Enter=pin, a=auto  |  q=quit";
+const MODEL_LIST_EMPTY_MESSAGE: &str = "No models returned by this provider";
+const PROVIDER_DETAILS_TITLE: &str = " Provider Details ";
+const MODELS_TITLE: &str = " Models ";
+const CONTROL_CHANNEL_CAPACITY: usize = 16;
+const MODEL_FETCH_CHANNEL_CAPACITY: usize = 4;
+const QUOTA_FETCH_CHANNEL_CAPACITY: usize = 4;
+const UI_POLL_INTERVAL_MS: u64 = 200;
+const CONTROL_TIMEOUT_OVERRIDE_SECS: u64 = 2;
+const CONTROL_TIMEOUT_RELOAD_SECS: u64 = 3;
 
 // ─── Provider tab view state ──────────────────────────────────────────────────
 
@@ -131,7 +174,282 @@ struct TuiApp {
     model_req_tx: tokio::sync::mpsc::Sender<ModelFetchRequest>,
     /// Receive model fetch results from the background async task
     model_res_rx: std::sync::mpsc::Receiver<Result<Vec<String>, String>>,
+    /// Send quota fetch requests to the background async task
+    quota_req_tx: tokio::sync::mpsc::Sender<QuotaFetchRequest>,
+    /// Receive quota fetch results from the background async task
+    quota_res_rx: std::sync::mpsc::Receiver<(String, Result<CodexQuotaInfo, String>)>,
+    /// Cached quota state keyed by provider name
+    quota_state_by_provider: HashMap<String, ProviderQuotaState>,
 }
+
+fn quota_ttl_ms() -> i64 {
+    let ttl = codex_quota_ttl_ms();
+    if ttl > 0 {
+        ttl
+    } else {
+        5 * 60 * 1000
+    }
+}
+
+fn quota_last_queried_at(state: Option<&ProviderQuotaState>) -> Option<i64> {
+    match state {
+        Some(ProviderQuotaState::Ready(quota)) => Some(quota.queried_at_ms),
+        _ => None,
+    }
+}
+
+fn format_quota_updated(queried_at_ms: i64) -> String {
+    let age_minutes = now_epoch_ms().saturating_sub(queried_at_ms) / 60_000;
+    if age_minutes <= 0 {
+        format!("{}{}", QUOTA_UPDATED_PREFIX, QUOTA_UPDATED_JUST_NOW)
+    } else {
+        format!(
+            "{}{}{}",
+            QUOTA_UPDATED_PREFIX, age_minutes, QUOTA_UPDATED_MIN_SUFFIX
+        )
+    }
+}
+
+fn maybe_fetch_selected_provider_quota(app: &mut TuiApp, force: bool) {
+    let provider_names = sorted_provider_names(&app.config);
+    let Some(idx) = app.provider_list_state.selected() else {
+        return;
+    };
+    let Some(provider_name) = provider_names.get(idx).cloned() else {
+        return;
+    };
+    let Ok(cfg) = app.config.get_provider(&provider_name) else {
+        return;
+    };
+    if !is_codex_oauth_provider(&cfg) {
+        return;
+    }
+
+    let should_fetch = if force {
+        true
+    } else {
+        match app.quota_state_by_provider.get(&provider_name) {
+            Some(ProviderQuotaState::Loading) => false,
+            state => {
+                should_refresh_quota(quota_last_queried_at(state), now_epoch_ms(), quota_ttl_ms())
+            }
+        }
+    };
+
+    if should_fetch {
+        app.quota_state_by_provider
+            .insert(provider_name.clone(), ProviderQuotaState::Loading);
+        let _ = app.quota_req_tx.try_send(QuotaFetchRequest {
+            provider_name,
+            config: cfg,
+        });
+    }
+}
+
+fn quota_detail_lines(app: &TuiApp, provider_name: &str) -> Vec<Line<'static>> {
+    match app.quota_state_by_provider.get(provider_name) {
+        Some(ProviderQuotaState::Loading) => {
+            vec![Line::from(format!("  {}", CODEX_QUOTA_LOADING_MESSAGE))]
+        }
+        Some(ProviderQuotaState::Error(message)) => {
+            vec![Line::from(format!("  {}{}", QUOTA_ERROR_PREFIX, message))]
+        }
+        Some(ProviderQuotaState::Ready(quota)) => {
+            let mut lines: Vec<Line<'static>> = codex_quota_rows(quota, now_epoch_ms())
+                .into_iter()
+                .map(|(window, usage, reset)| {
+                    Line::from(format!(
+                        "  {}{}{}{}reset {}",
+                        window, QUOTA_ROW_SEPARATOR, usage, QUOTA_ROW_SEPARATOR, reset
+                    ))
+                })
+                .collect();
+            if lines.is_empty() {
+                lines.push(Line::from(format!("  {}", CODEX_QUOTA_EMPTY_MESSAGE)));
+            }
+            lines.push(Line::from(format!(
+                "  {}",
+                format_quota_updated(quota.queried_at_ms)
+            )));
+            lines
+        }
+        None => vec![Line::from(format!("  {}", CODEX_QUOTA_LOADING_MESSAGE))],
+    }
+}
+
+fn provider_detail_lines(
+    app: &TuiApp,
+    provider_name: &str,
+    cfg: &ProviderConfig,
+) -> Vec<Line<'static>> {
+    let mut lines = vec![
+        Line::from(vec![
+            Span::styled("Name:      ", Style::default().fg(Color::Cyan)),
+            Span::raw(provider_name.to_string()),
+        ]),
+        Line::from(vec![
+            Span::styled("Type:      ", Style::default().fg(Color::Cyan)),
+            Span::raw(cfg.provider_type.clone()),
+        ]),
+        Line::from(vec![
+            Span::styled("API Key:   ", Style::default().fg(Color::Cyan)),
+            Span::raw(
+                cfg.api_key
+                    .as_deref()
+                    .map(|k| {
+                        if k.len() > 8 {
+                            format!("{}...{}", &k[..4], &k[k.len() - 4..])
+                        } else {
+                            "****".to_string()
+                        }
+                    })
+                    .unwrap_or_else(|| "not set".to_string()),
+            ),
+        ]),
+        Line::from(vec![
+            Span::styled("Auth Type: ", Style::default().fg(Color::Cyan)),
+            Span::raw(cfg.auth_type.as_deref().unwrap_or("api_key").to_string()),
+        ]),
+        Line::from(vec![
+            Span::styled("Base URL:  ", Style::default().fg(Color::Cyan)),
+            Span::raw(cfg.base_url.as_deref().unwrap_or("(default)").to_string()),
+        ]),
+        Line::from(Span::styled(
+            CODEX_QUOTA_HELP_LINE,
+            Style::default().fg(Color::DarkGray),
+        )),
+    ];
+
+    if is_codex_oauth_provider(cfg) {
+        lines.push(Line::from(""));
+        lines.push(Line::from(Span::styled(
+            format!("  {}", CODEX_QUOTA_SECTION_TITLE),
+            Style::default()
+                .fg(Color::Yellow)
+                .add_modifier(Modifier::BOLD),
+        )));
+        lines.extend(quota_detail_lines(app, provider_name));
+        lines.push(Line::from(Span::styled(
+            CODEX_QUOTA_REFRESH_LINE,
+            Style::default().fg(Color::DarkGray),
+        )));
+    }
+
+    lines
+}
+
+fn sorted_provider_names(config: &Config) -> Vec<String> {
+    let mut provider_names: Vec<String> = config.providers().keys().cloned().collect();
+    provider_names.sort();
+    provider_names
+}
+
+fn selected_provider_name(app: &TuiApp) -> Option<String> {
+    sorted_provider_names(&app.config)
+        .get(app.provider_list_state.selected().unwrap_or(0))
+        .cloned()
+}
+
+fn refresh_provider_names_after_selection_change(app: &mut TuiApp) {
+    maybe_fetch_selected_provider_quota(app, false);
+}
+
+fn apply_quota_result(
+    app: &mut TuiApp,
+    provider_name: String,
+    result: Result<CodexQuotaInfo, String>,
+) {
+    let state = match result {
+        Ok(quota) => ProviderQuotaState::Ready(quota),
+        Err(error) => ProviderQuotaState::Error(error),
+    };
+    let status_message = match &state {
+        ProviderQuotaState::Ready(quota) => Some(format_quota_updated(quota.queried_at_ms)),
+        ProviderQuotaState::Error(message) => Some(format!("{}{}", QUOTA_ERROR_PREFIX, message)),
+        ProviderQuotaState::Loading => None,
+    };
+    app.quota_state_by_provider.insert(provider_name, state);
+    if let Some(message) = status_message {
+        app.status_message = message;
+    }
+}
+
+fn queue_model_fetch_for_selected_provider(app: &mut TuiApp, provider_name: String) {
+    if let Ok(cfg) = app.config.get_provider(&provider_name) {
+        let _ = app.model_req_tx.try_send(ModelFetchRequest {
+            provider_name,
+            config: cfg,
+        });
+        app.provider_view = ProviderViewState::FetchingModels;
+    } else {
+        app.provider_view = ProviderViewState::Error {
+            message: format!("Failed to load provider '{}' config", provider_name),
+        };
+    }
+}
+
+fn maybe_force_refresh_selected_provider_quota(app: &mut TuiApp, key: KeyCode) {
+    if matches!(key, KeyCode::Char(c) if c == CODEX_QUOTA_REFRESH_KEY) {
+        maybe_fetch_selected_provider_quota(app, true);
+    }
+}
+
+fn provider_detail_text(app: &TuiApp) -> Vec<Line<'static>> {
+    let providers = app.config.providers();
+    if let Some(name) = selected_provider_name(app) {
+        if let Some(cfg) = providers.get(&name) {
+            provider_detail_lines(app, &name, cfg)
+        } else {
+            vec![Line::from(PROVIDER_DETAIL_SELECT_MESSAGE)]
+        }
+    } else if providers.is_empty() {
+        vec![Line::from(PROVIDER_DETAIL_EMPTY_MESSAGE)]
+    } else {
+        vec![Line::from(PROVIDER_DETAIL_SELECT_MESSAGE)]
+    }
+}
+
+fn model_loading_paragraph() -> Paragraph<'static> {
+    Paragraph::new(vec![
+        Line::from(""),
+        Line::from(Span::styled(
+            "  ⠋ Fetching model list…",
+            Style::default().fg(Color::Yellow),
+        )),
+        Line::from(""),
+        Line::from(Span::styled(
+            "  Esc — cancel",
+            Style::default().fg(Color::DarkGray),
+        )),
+    ])
+    .block(Block::default().borders(Borders::ALL).title(MODELS_TITLE))
+}
+
+fn provider_list_items(app: &TuiApp) -> Vec<ListItem<'static>> {
+    sorted_provider_names(&app.config)
+        .into_iter()
+        .map(ListItem::new)
+        .collect()
+}
+
+fn update_provider_selection(app: &mut TuiApp, index: usize) {
+    app.provider_list_state.select(Some(index));
+    refresh_provider_names_after_selection_change(app);
+}
+
+fn move_provider_selection(app: &mut TuiApp, delta: isize) {
+    let provider_names = sorted_provider_names(&app.config);
+    if provider_names.is_empty() {
+        app.provider_list_state.select(Some(0));
+        return;
+    }
+
+    let current = app.provider_list_state.selected().unwrap_or(0) as isize;
+    let next = (current + delta).rem_euclid(provider_names.len() as isize) as usize;
+    update_provider_selection(app, next);
+}
+
+// ─── Provider tab view state ──────────────────────────────────────────────────
 
 impl TuiApp {
     fn new(
@@ -141,6 +459,8 @@ impl TuiApp {
         status_rx: mpsc::Receiver<String>,
         model_req_tx: tokio::sync::mpsc::Sender<ModelFetchRequest>,
         model_res_rx: std::sync::mpsc::Receiver<Result<Vec<String>, String>>,
+        quota_req_tx: tokio::sync::mpsc::Sender<QuotaFetchRequest>,
+        quota_res_rx: std::sync::mpsc::Receiver<(String, Result<CodexQuotaInfo, String>)>,
     ) -> Self {
         let mut provider_list_state = ListState::default();
         provider_list_state.select(Some(0));
@@ -150,23 +470,26 @@ impl TuiApp {
         let mut scenario_names: Vec<String> = config.scenarios().keys().cloned().collect();
         scenario_names.sort();
 
-        Self {
+        let mut app = Self {
             tab: ActiveTab::Status,
             config,
             config_path,
             provider_list_state,
             scenario_list_state,
             scenario_names,
-            status_message:
-                "Ready. Tab/Shift+Tab: switch tabs  |  Scenarios: Enter=pin, a=auto  |  q=quit"
-                    .to_string(),
+            status_message: DEFAULT_STATUS_MESSAGE.to_string(),
             active_override: None,
             cmd_tx,
             status_rx,
             provider_view: ProviderViewState::ProviderDetail,
             model_req_tx,
             model_res_rx,
-        }
+            quota_req_tx,
+            quota_res_rx,
+            quota_state_by_provider: HashMap::new(),
+        };
+        refresh_provider_names_after_selection_change(&mut app);
+        app
     }
 }
 
@@ -187,7 +510,8 @@ impl TuiManager {
 
     pub async fn run(&self, config: Config, config_path: String) {
         let port = config.daemon().port;
-        let (cmd_tx, mut cmd_rx) = tokio::sync::mpsc::channel::<ControlCommand>(16);
+        let (cmd_tx, mut cmd_rx) =
+            tokio::sync::mpsc::channel::<ControlCommand>(CONTROL_CHANNEL_CAPACITY);
         let (status_tx, status_rx) = mpsc::channel::<String>();
 
         // Background async task: receives control commands, sends HTTP to daemon
@@ -204,7 +528,7 @@ impl TuiManager {
                         match client
                             .post(&url)
                             .json(&body)
-                            .timeout(Duration::from_secs(2))
+                            .timeout(Duration::from_secs(CONTROL_TIMEOUT_OVERRIDE_SECS))
                             .send()
                             .await
                         {
@@ -227,7 +551,7 @@ impl TuiManager {
                         let url = format!("http://127.0.0.1:{}/control/reload", port);
                         match client
                             .post(&url)
-                            .timeout(Duration::from_secs(3))
+                            .timeout(Duration::from_secs(CONTROL_TIMEOUT_RELOAD_SECS))
                             .send()
                             .await
                         {
@@ -250,14 +574,29 @@ impl TuiManager {
         });
 
         // Background task: fetch model lists from provider APIs
-        let (model_req_tx, mut model_req_rx) = tokio::sync::mpsc::channel::<ModelFetchRequest>(4);
+        let (model_req_tx, mut model_req_rx) =
+            tokio::sync::mpsc::channel::<ModelFetchRequest>(MODEL_FETCH_CHANNEL_CAPACITY);
         let (model_res_tx, model_res_rx) =
             std::sync::mpsc::channel::<Result<Vec<String>, String>>();
 
         tokio::spawn(async move {
             while let Some(req) = model_req_rx.recv().await {
+                let _provider_name = req.provider_name;
                 let result = crate::provider::models::fetch_provider_models(&req.config).await;
                 let _ = model_res_tx.send(result);
+            }
+        });
+
+        let (quota_req_tx, mut quota_req_rx) =
+            tokio::sync::mpsc::channel::<QuotaFetchRequest>(QUOTA_FETCH_CHANNEL_CAPACITY);
+        let (quota_res_tx, quota_res_rx) =
+            std::sync::mpsc::channel::<(String, Result<CodexQuotaInfo, String>)>();
+
+        tokio::spawn(async move {
+            while let Some(req) = quota_req_rx.recv().await {
+                let provider_name = req.provider_name;
+                let result = fetch_provider_quota(&req.config).await;
+                let _ = quota_res_tx.send((provider_name, result));
             }
         });
 
@@ -270,6 +609,8 @@ impl TuiManager {
                 status_rx,
                 model_req_tx,
                 model_res_rx,
+                quota_req_tx,
+                quota_res_rx,
             ) {
                 eprintln!("TUI error: {e}");
             }
@@ -308,6 +649,8 @@ fn run_tui(
     status_rx: mpsc::Receiver<String>,
     model_req_tx: tokio::sync::mpsc::Sender<ModelFetchRequest>,
     model_res_rx: std::sync::mpsc::Receiver<Result<Vec<String>, String>>,
+    quota_req_tx: tokio::sync::mpsc::Sender<QuotaFetchRequest>,
+    quota_res_rx: std::sync::mpsc::Receiver<(String, Result<CodexQuotaInfo, String>)>,
 ) -> io::Result<()> {
     let mut terminal = setup_terminal()?;
     let mut app = TuiApp::new(
@@ -317,6 +660,8 @@ fn run_tui(
         status_rx,
         model_req_tx,
         model_res_rx,
+        quota_req_tx,
+        quota_res_rx,
     );
     let result = event_loop(&mut terminal, &mut app);
     restore_terminal(&mut terminal);
@@ -344,7 +689,7 @@ fn event_loop(
             if matches!(&app.provider_view, ProviderViewState::FetchingModels) {
                 app.provider_view = match result {
                     Ok(models) if models.is_empty() => ProviderViewState::Error {
-                        message: "No models returned by this provider".to_string(),
+                        message: MODEL_LIST_EMPTY_MESSAGE.to_string(),
                     },
                     Ok(models) => ProviderViewState::ModelList {
                         models,
@@ -356,10 +701,14 @@ fn event_loop(
             }
         }
 
+        while let Ok((provider_name, result)) = app.quota_res_rx.try_recv() {
+            apply_quota_result(app, provider_name, result);
+        }
+
         terminal.draw(|f| draw_ui(f, app))?;
 
         // Non-blocking poll so the UI stays responsive and status_rx is checked regularly
-        if event::poll(Duration::from_millis(200))? {
+        if event::poll(Duration::from_millis(UI_POLL_INTERVAL_MS))? {
             if let Event::Key(key) = event::read()? {
                 match (key.code, key.modifiers) {
                     (KeyCode::Char('q'), _) | (KeyCode::Char('c'), KeyModifiers::CONTROL) => break,
@@ -427,46 +776,18 @@ fn commit_model_to_scenario(
 fn handle_tab_key(app: &mut TuiApp, key: KeyCode) {
     match app.tab {
         ActiveTab::Providers => {
-            let providers: Vec<String> = app.config.providers().keys().cloned().collect();
+            let providers = sorted_provider_names(&app.config);
             match app.provider_view.clone() {
                 ProviderViewState::ProviderDetail => match key {
-                    KeyCode::Down | KeyCode::Char('j') => {
-                        let i = app.provider_list_state.selected().unwrap_or(0);
-                        let next = if providers.is_empty() {
-                            0
-                        } else {
-                            (i + 1) % providers.len()
-                        };
-                        app.provider_list_state.select(Some(next));
-                    }
-                    KeyCode::Up | KeyCode::Char('k') => {
-                        let i = app.provider_list_state.selected().unwrap_or(0);
-                        let prev = if i == 0 {
-                            providers.len().saturating_sub(1)
-                        } else {
-                            i - 1
-                        };
-                        app.provider_list_state.select(Some(prev));
-                    }
+                    KeyCode::Down | KeyCode::Char('j') => move_provider_selection(app, 1),
+                    KeyCode::Up | KeyCode::Char('k') => move_provider_selection(app, -1),
                     KeyCode::Enter => {
-                        if let Some(idx) = app.provider_list_state.selected() {
-                            if let Some(name) = providers.get(idx).cloned() {
-                                if let Ok(cfg) = app.config.get_provider(&name) {
-                                    let _ = app.model_req_tx.try_send(ModelFetchRequest {
-                                        provider_name: name,
-                                        config: cfg,
-                                    });
-                                    app.provider_view = ProviderViewState::FetchingModels;
-                                } else {
-                                    app.provider_view = ProviderViewState::Error {
-                                        message: format!(
-                                            "Failed to load provider '{}' config",
-                                            name
-                                        ),
-                                    };
-                                }
-                            }
+                        if let Some(name) = selected_provider_name(app) {
+                            queue_model_fetch_for_selected_provider(app, name);
                         }
+                    }
+                    KeyCode::Char(c) if c == CODEX_QUOTA_REFRESH_KEY => {
+                        maybe_force_refresh_selected_provider_quota(app, key);
                     }
                     _ => {}
                 },
@@ -943,14 +1264,7 @@ fn draw_providers(f: &mut ratatui::Frame, app: &mut TuiApp, area: ratatui::layou
         .constraints([Constraint::Percentage(35), Constraint::Percentage(65)])
         .split(area);
 
-    // ── Left pane: provider list ───────────────────────────────────────────────
-    let providers = app.config.providers();
-    let items: Vec<ListItem> = providers
-        .keys()
-        .map(|name| ListItem::new(name.as_str()))
-        .collect();
-
-    let list = List::new(items)
+    let list = List::new(provider_list_items(app))
         .block(Block::default().borders(Borders::ALL).title(" Providers "))
         .highlight_style(
             Style::default()
@@ -960,94 +1274,25 @@ fn draw_providers(f: &mut ratatui::Frame, app: &mut TuiApp, area: ratatui::layou
         .highlight_symbol("▶ ");
     f.render_stateful_widget(list, panes[0], &mut app.provider_list_state);
 
-    // ── Right pane: driven by ProviderViewState ────────────────────────────────
     match app.provider_view.clone() {
         ProviderViewState::ProviderDetail => {
-            let provider_names: Vec<String> = providers.keys().cloned().collect();
-            let detail_text = if let Some(idx) = app.provider_list_state.selected() {
-                if let Some(name) = provider_names.get(idx) {
-                    if let Some(cfg) = providers.get(name) {
-                        vec![
-                            Line::from(vec![
-                                Span::styled("Name:      ", Style::default().fg(Color::Cyan)),
-                                Span::raw(name.as_str()),
-                            ]),
-                            Line::from(vec![
-                                Span::styled("Type:      ", Style::default().fg(Color::Cyan)),
-                                Span::raw(cfg.provider_type.as_str()),
-                            ]),
-                            Line::from(vec![
-                                Span::styled("API Key:   ", Style::default().fg(Color::Cyan)),
-                                Span::raw(
-                                    cfg.api_key
-                                        .as_deref()
-                                        .map(|k| {
-                                            if k.len() > 8 {
-                                                format!("{}...{}", &k[..4], &k[k.len() - 4..])
-                                            } else {
-                                                "****".to_string()
-                                            }
-                                        })
-                                        .unwrap_or_else(|| "not set".to_string()),
-                                ),
-                            ]),
-                            Line::from(vec![
-                                Span::styled("Auth Type: ", Style::default().fg(Color::Cyan)),
-                                Span::raw(cfg.auth_type.as_deref().unwrap_or("api_key")),
-                            ]),
-                            Line::from(vec![
-                                Span::styled("Base URL:  ", Style::default().fg(Color::Cyan)),
-                                Span::raw(cfg.base_url.as_deref().unwrap_or("(default)")),
-                            ]),
-                            Line::from(""),
-                            Line::from(Span::styled(
-                                "  Enter — fetch model list",
-                                Style::default().fg(Color::DarkGray),
-                            )),
-                        ]
-                    } else {
-                        vec![Line::from("Select a provider")]
-                    }
-                } else {
-                    vec![Line::from("Select a provider")]
-                }
-            } else {
-                vec![Line::from("No providers configured")]
-            };
-
-            let detail = Paragraph::new(detail_text)
+            let detail = Paragraph::new(provider_detail_text(app))
                 .block(
                     Block::default()
                         .borders(Borders::ALL)
-                        .title(" Provider Details "),
+                        .title(PROVIDER_DETAILS_TITLE),
                 )
                 .alignment(Alignment::Left);
             f.render_widget(detail, panes[1]);
         }
-
         ProviderViewState::FetchingModels => {
-            let para = Paragraph::new(vec![
-                Line::from(""),
-                Line::from(Span::styled(
-                    "  ⠋ Fetching model list…",
-                    Style::default().fg(Color::Yellow),
-                )),
-                Line::from(""),
-                Line::from(Span::styled(
-                    "  Esc — cancel",
-                    Style::default().fg(Color::DarkGray),
-                )),
-            ])
-            .block(Block::default().borders(Borders::ALL).title(" Models "));
-            f.render_widget(para, panes[1]);
+            f.render_widget(model_loading_paragraph(), panes[1]);
         }
-
         ProviderViewState::ModelList {
             models,
             selected,
             search_query,
         } => {
-            // 过滤模型
             let filtered_models: Vec<&String> = if search_query.is_empty() {
                 models.iter().collect()
             } else {
@@ -1057,10 +1302,6 @@ fn draw_providers(f: &mut ratatui::Frame, app: &mut TuiApp, area: ratatui::layou
                     .collect()
             };
 
-            let mut state = ListState::default();
-            state.select(Some(selected.min(filtered_models.len().saturating_sub(1))));
-
-            // 创建搜索栏和模型列表
             let mut lines = vec![
                 Line::from(vec![
                     Span::styled("Search: ", Style::default().fg(Color::Cyan)),
@@ -1070,7 +1311,6 @@ fn draw_providers(f: &mut ratatui::Frame, app: &mut TuiApp, area: ratatui::layou
                 Line::from(""),
             ];
 
-            // 添加过滤后的模型（支持键盘导航）
             for (i, model) in filtered_models.iter().enumerate() {
                 let is_selected = i == selected;
                 let prefix = if is_selected { "▶ " } else { "  " };
@@ -1105,7 +1345,6 @@ fn draw_providers(f: &mut ratatui::Frame, app: &mut TuiApp, area: ratatui::layou
                 Paragraph::new(lines).block(Block::default().borders(Borders::ALL).title(title));
             f.render_widget(para, panes[1]);
         }
-
         ProviderViewState::CostTierPicker { model, selected } => {
             let tiers = [
                 ("low", "适合快速、便宜的任务"),
@@ -1154,7 +1393,6 @@ fn draw_providers(f: &mut ratatui::Frame, app: &mut TuiApp, area: ratatui::layou
                 .block(Block::default().borders(Borders::ALL).title(" Cost Tier "));
             f.render_widget(para, panes[1]);
         }
-
         ProviderViewState::ScenarioPicker {
             model,
             cost_tier,
@@ -1201,7 +1439,6 @@ fn draw_providers(f: &mut ratatui::Frame, app: &mut TuiApp, area: ratatui::layou
                 )));
             }
 
-            // "[+ New Scenario]" item
             if creating_new {
                 lines.push(Line::from(Span::styled(
                     format!("▶ [+ New Scenario]: {}_", new_name_input),
@@ -1245,7 +1482,6 @@ fn draw_providers(f: &mut ratatui::Frame, app: &mut TuiApp, area: ratatui::layou
             );
             f.render_widget(para, panes[1]);
         }
-
         ProviderViewState::Done { message } => {
             let para = Paragraph::new(vec![
                 Line::from(""),
@@ -1264,7 +1500,6 @@ fn draw_providers(f: &mut ratatui::Frame, app: &mut TuiApp, area: ratatui::layou
             .block(Block::default().borders(Borders::ALL).title(" Done "));
             f.render_widget(para, panes[1]);
         }
-
         ProviderViewState::Error { message } => {
             let para = Paragraph::new(vec![
                 Line::from(""),

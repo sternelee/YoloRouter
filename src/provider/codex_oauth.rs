@@ -32,6 +32,7 @@ pub const CODEX_CLIENT_ID: &str = "app_EMoamEEZ73f0CkXaXp7hrann";
 const DEVICE_AUTH_USERCODE_URL: &str = "https://auth.openai.com/api/accounts/deviceauth/usercode";
 const DEVICE_AUTH_TOKEN_URL: &str = "https://auth.openai.com/api/accounts/deviceauth/token";
 const OAUTH_TOKEN_URL: &str = "https://auth.openai.com/oauth/token";
+const CODEX_USAGE_URL: &str = "https://chatgpt.com/backend-api/wham/usage";
 const DEVICE_REDIRECT_URI: &str = "https://auth.openai.com/deviceauth/callback";
 
 /// URL shown to the user during device flow
@@ -66,6 +67,36 @@ struct OAuthTokenResponse {
     refresh_token: Option<String>,
     #[serde(default)]
     expires_in: Option<i64>,
+}
+
+#[derive(Debug, Clone, Deserialize, PartialEq)]
+pub struct CodexQuotaWindow {
+    #[serde(default)]
+    pub used_percent: Option<f64>,
+    #[serde(default)]
+    pub limit_window_seconds: Option<i64>,
+    #[serde(default)]
+    pub reset_at: Option<i64>,
+}
+
+#[derive(Debug, Clone, Deserialize, PartialEq)]
+pub struct CodexQuotaRateLimit {
+    #[serde(default)]
+    pub primary_window: Option<CodexQuotaWindow>,
+    #[serde(default)]
+    pub secondary_window: Option<CodexQuotaWindow>,
+}
+
+#[derive(Debug, Clone, Deserialize)]
+struct CodexUsageResponse {
+    #[serde(default)]
+    rate_limit: Option<CodexQuotaRateLimit>,
+}
+
+#[derive(Debug, Clone, PartialEq)]
+pub struct CodexQuotaInfo {
+    pub rate_limit: CodexQuotaRateLimit,
+    pub queried_at_ms: i64,
 }
 
 // ─── Public display type for TUI ─────────────────────────────────────────────
@@ -365,6 +396,54 @@ impl CodexOAuthProvider {
         self.refresh_access_token().await
     }
 
+    pub async fn fetch_usage(&self, account_id: Option<&str>) -> Result<CodexQuotaInfo> {
+        let token = self.get_valid_token().await?;
+
+        let mut request = self
+            .client
+            .get(CODEX_USAGE_URL)
+            .header("Authorization", format!("Bearer {}", token))
+            .header("User-Agent", "codex-cli")
+            .header("Accept", "application/json");
+
+        if let Some(account_id) = account_id.filter(|id| !id.trim().is_empty()) {
+            request = request.header("ChatGPT-Account-Id", account_id);
+        }
+
+        let response = request
+            .send()
+            .await
+            .map_err(crate::error::YoloRouterError::HttpError)?;
+
+        let status = response.status();
+        if status == reqwest::StatusCode::UNAUTHORIZED || status == reqwest::StatusCode::FORBIDDEN {
+            return Err(crate::error::YoloRouterError::AuthError(format!(
+                "Codex usage query unauthorized: HTTP {}. Re-authenticate with: yolo-router --auth codex",
+                status
+            )));
+        }
+
+        if !status.is_success() {
+            let text = response.text().await.unwrap_or_default();
+            return Err(crate::error::YoloRouterError::RequestError(format!(
+                "Codex usage query failed: {status} - {text}"
+            )));
+        }
+
+        let usage: CodexUsageResponse = response
+            .json()
+            .await
+            .map_err(crate::error::YoloRouterError::HttpError)?;
+
+        Ok(CodexQuotaInfo {
+            rate_limit: usage.rate_limit.unwrap_or(CodexQuotaRateLimit {
+                primary_window: None,
+                secondary_window: None,
+            }),
+            queried_at_ms: now_ms(),
+        })
+    }
+
     async fn persist_and_cache(&self, state: CodexTokenState) {
         if let Some(ref path) = self.token_path {
             if let Some(parent) = path.parent() {
@@ -480,6 +559,7 @@ impl Provider for CodexOAuthProvider {
 #[cfg(test)]
 mod tests {
     use super::*;
+    use serde_json::json;
 
     #[test]
     fn test_token_state_is_valid_when_has_token() {
@@ -524,5 +604,38 @@ mod tests {
         let v = serde_json::json!(5u64);
         assert_eq!(parse_interval(Some(&v)), 5);
         assert_eq!(parse_interval(None), 5); // default
+    }
+
+    #[test]
+    fn test_parse_codex_usage_response_windows() {
+        let payload = json!({
+            "rate_limit": {
+                "primary_window": {
+                    "used_percent": 12.5,
+                    "limit_window_seconds": 18000,
+                    "reset_at": 1_717_171_717
+                },
+                "secondary_window": {
+                    "used_percent": 88.8,
+                    "limit_window_seconds": 604800,
+                    "reset_at": 1_818_181_818
+                }
+            }
+        });
+
+        let parsed: CodexUsageResponse = serde_json::from_value(payload).unwrap();
+        let rate_limit = parsed.rate_limit.unwrap();
+
+        assert_eq!(rate_limit.primary_window.unwrap().used_percent, Some(12.5));
+        assert_eq!(
+            rate_limit.secondary_window.unwrap().limit_window_seconds,
+            Some(604800)
+        );
+    }
+
+    #[test]
+    fn test_parse_codex_usage_response_without_rate_limit() {
+        let parsed: CodexUsageResponse = serde_json::from_value(json!({})).unwrap();
+        assert!(parsed.rate_limit.is_none());
     }
 }
