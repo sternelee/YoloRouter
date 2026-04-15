@@ -75,7 +75,7 @@ jobs:
         if: runner.os != 'Windows'
         run: |
           if [ -f "target/${{ matrix.target }}/release/${{ matrix.artifact_name }}" ]; then
-            strip target/${{ matrix.target }}/release/${{ matrix.artifact_name }}" || true
+            strip "target/${{ matrix.target }}/release/${{ matrix.artifact_name }}" || true
           fi
 
       - name: Test binary (sanity check)
@@ -91,5 +91,5 @@ jobs:
         uses: actions/upload-artifact@v4
         with:
           name: ${{ matrix.asset_name }}
-          path: target/${{ matrix.target }}/release/${{ matrix.artifact_name }}${{ runner.os == 'Windows' && '.exe' || '' }}
+          path: target/${{ matrix.target }}/release/${{ matrix.artifact_name }}
           retention-days: 30
