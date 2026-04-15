@@ -2,247 +2,199 @@
 
 ## Project Essentials
 
-**YoloRouter** is a Rust-based intelligent AI model routing proxy. It routes requests to multiple AI providers (Anthropic, OpenAI, Gemini, GitHub Copilot, Codex, and OpenAI-compatible services) based on scenario, cost, and capability. Supports daemon mode, TUI-driven configuration, TOML config with env var expansion, fallback chains, and HTTP API.
+**YoloRouter** is a Rust-based AI model routing proxy. Routes requests to multiple AI providers (Anthropic, OpenAI, Gemini, GitHub Copilot, Codex, OpenAI-compatible) based on scenario, cost, and capability. Supports daemon mode, TUI-driven auth, TOML config with env var expansion, fallback chains, and HTTP API.
 
-**Status**: Feature-complete (54 tests passing). Builds and runs; all core features functional.
+- **Binary**: `yolo-router` → `target/release/yolo-router`
+- **Rust edition**: 2021 | **Default port**: 8989 (bound to `127.0.0.1` only)
+- **No Makefile/Justfile** — all commands are `cargo` invocations
 
-## Key Developer Commands
+## Developer Commands
 
 ```bash
 # Build
-cargo build --release             # Production build
-cargo check                       # Quick syntax check
+cargo build --release             # Production
+cargo check                       # Fastest syntax check
 
 # Test
-cargo test --lib                 # Unit tests only (47 passing)
-cargo test                        # All tests (54 passing)
-cargo test config::              # Test specific module
-cargo test -- --nocapture        # Show println! output
+cargo test --lib                  # Unit tests only
+cargo test                        # All tests (unit + integration)
+cargo test --lib config::         # Single module
+cargo test -- --nocapture         # Show println! output
+# CI uses: cargo test --lib --release
 
-# Code quality
-cargo clippy                      # Lint warnings
-cargo fmt --check                # Format check
-cargo fmt                         # Auto-format
+# Lint / Format
+cargo fmt                                                          # Auto-format
+cargo fmt --check                                                  # CI format check
+cargo clippy --all-targets --release -- -D warnings               # CI strict mode
+cargo clippy --fix --lib -p yolo-router --allow-dirty --allow-staged  # Auto-fix
 
 # Run daemon
 YOLO_CONFIG=config.toml cargo run --release
-
-# Run with auth flow
-cargo run -- --auth anthropic    # Interactive TUI auth for provider
-cargo run -- --tui               # TUI mode (config editor)
+cargo run -- --config /path/to/config.toml
+cargo run -- --auth github        # GitHub Copilot OAuth device flow
+cargo run -- --auth codex         # Codex/ChatGPT Pro OAuth device flow
+cargo run -- --tui                # TUI config editor
 ```
 
-## Architecture Essentials
-
-### Module Structure
+## Module Structure
 
 ```
 src/
-├── main.rs               # Daemon entry, --auth, --config, --tui flags
+├── main.rs               # Entry point; --auth, --config, --tui flags
 ├── lib.rs                # Public exports
 ├── models.rs             # ChatRequest/ChatResponse, Message types
-├── error.rs              # YoloRouterError enum (thiserror)
-├── config/               # TOML parsing + validation
-│   ├── mod.rs            # Daemon/Provider/Scenario/Routing config structs
+├── error.rs              # YoloRouterError (thiserror)
+├── config/
+│   ├── mod.rs            # Config structs: Daemon/Provider/Scenario/Routing
 │   └── parser.rs         # from_file(), env var expansion
-├── provider/             # Provider trait implementations
-│   ├── mod.rs            # Provider trait definition
+├── provider/
+│   ├── mod.rs            # Provider trait
 │   ├── factory.rs        # create_provider() factory
-│   ├── anthropic.rs      # Anthropic client
-│   ├── openai.rs         # OpenAI client
-│   ├── gemini.rs         # Gemini client
-│   └── codex_oauth.rs    # OAuth-based providers
-├── router/               # Routing decisions + fallback
+│   ├── anthropic.rs
+│   ├── openai.rs         # Also handles all OpenAI-compatible providers
+│   ├── gemini.rs
+│   ├── github_copilot.rs # Token from ~/.config/yolo-router/github_token
+│   └── codex_oauth.rs    # Token from ~/.config/yolo-router/codex_oauth.json
+├── router/
 │   ├── mod.rs            # ProviderRegistry, Router
-│   ├── engine.rs         # RoutingEngine (scenario selection)
-│   └── fallback.rs       # FallbackChain (retry logic)
-├── server/               # HTTP daemon
-│   └── mod.rs            # Actix-web routes: /v1/{anthropic,openai,gemini,codex,auto}, /health, /stats, /config, /control/*
-├── analyzer/             # 15-dimensional model analyzer
-│   └── multidimensional.rs  # FastAnalyzer, RequestFeatures, TaskType, Language, ModelScore
-├── tui/                  # Terminal UI
-│   ├── auth.rs           # Interactive provider auth
-│   ├── github_auth.rs    # GitHub OAuth device flow
-│   ├── codex_auth.rs     # ChatGPT Pro OAuth device flow
-│   └── config_editor.rs  # Config editor UI (framework)
-└── utils/                # Stats, logging
-    ├── stats.rs          # StatsCollector (thread-safe, tracks requests/providers/times)
-    └── init_logger()     # Tracing setup
+│   ├── engine.rs         # RoutingEngine — scenario selection; also handles provider:model bypass
+│   └── fallback.rs       # FallbackChain
+├── server/mod.rs         # Actix-web routes + AppState
+├── analyzer/multidimensional.rs  # FastAnalyzer (15 dimensions)
+├── tui/
+│   ├── auth.rs           # Auth state machine
+│   ├── github_auth.rs    # GitHub device flow
+│   └── codex_auth.rs     # ChatGPT Pro device flow
+└── utils/
+    ├── stats.rs          # StatsCollector (last 1000 requests, thread-safe)
+    └── mod.rs            # init_logger() — tracing setup
 ```
 
-### Request Flow
+## HTTP API Routes
 
-1. HTTP request arrives at endpoint (e.g., `POST /v1/auto`)
-2. `FastAnalyzer` examines request (15 dimensions: complexity, cost, latency, accuracy, etc.)
-3. `RoutingEngine` selects best scenario + model list
-4. `FallbackChain` tries models in order; retries on failure
-5. `Provider` sends to actual AI service (or returns placeholder in dev)
-6. Response serialized, stats recorded
+```
+GET  /health                        # Status + providers/scenarios list
+GET  /config                        # Current config as TOML text
+GET  /stats                         # Request statistics
+
+GET  /control/status                # Active overrides + providers/scenarios
+POST /control/override              # Pin endpoint to a scenario
+DELETE /control/override/{endpoint} # Clear override
+POST /control/reload                # Reload config from disk (no restart needed)
+
+POST /v1/auto                       # Auto-select via 15D FastAnalyzer
+POST /v1/anthropic
+POST /v1/anthropic/v1/messages      # Anthropic native path alias
+POST /v1/openai
+POST /v1/openai/chat/completions    # OpenAI native path alias
+POST /v1/gemini
+POST /v1/gemini/chat/completions
+POST /v1/codex
+POST /v1/codex/chat/completions
+```
+
+**Server quirk**: JSON body limit is 10MB. Entry point macro is `actix_web::main`, not `tokio::main`.
 
 ## Configuration
 
-### config.toml Structure
+### Config Loading Order (highest priority first)
+1. `--config <path>` CLI flag
+2. `YOLO_CONFIG` env var
+3. `config.toml` in CWD
+
+### Key config.toml Fields
 
 ```toml
 [daemon]
 port = 8989
-log_level = "info"
+log_level = "info"        # or use RUST_LOG env var
 
-[providers.anthropic]
-type = "anthropic"
-api_key = "${ANTHROPIC_API_KEY}"   # Env var expansion
+[providers.github_copilot]
+type = "github_copilot"   # Token auto-loaded from ~/.config/yolo-router/github_token
 
-[providers.openai]
-type = "openai"
-api_key = "${OPENAI_API_KEY}"
-
-# OpenAI-compatible services (all 100+ models via OpenRouter, Groq, DeepSeek, etc.)
 [providers.openrouter]
-type = "openai"
+type = "openai"           # Any OpenAI-compatible service uses type = "openai"
 base_url = "https://openrouter.ai/api/v1"
-api_key = "${OPENROUTER_API_KEY}"
+api_key = "${OPENROUTER_API_KEY}"   # Env var expansion
 
-[scenarios.production]
-models = [
-  { provider = "anthropic", model = "claude-opus", cost_tier = "high" },
-  { provider = "openai", model = "gpt-4", cost_tier = "high" }
-]
+[providers.ollama]
+type = "openai"
+base_url = "http://127.0.0.1:11434/v1"
+api_key = "${OLLAMA_API_KEY}"
 
 [routing]
 fallback_enabled = true
 timeout_ms = 30000
 retry_count = 2
+confidence_threshold = 0.6   # Below this, fallback to default scenario
+
+[[scenarios.coding.models]]
+provider = "github_copilot"
+model = "claude-sonnet-4.6"
+cost_tier = "high"
 ```
 
-**Key validation rules**: All referenced providers must exist; scenarios can have cost_tier filters.
+**dotenv**: `.env` files in CWD are loaded automatically via the `dotenv` crate.
 
-## Testing Quick Reference
+## Request Flow
 
-**All tests passing** (54/54):
+1. `POST /v1/auto` → `FastAnalyzer` scores request on 15 dimensions
+2. `RoutingEngine` selects scenario — **unless** `model` field is `"provider:model"` (e.g., `"github_copilot:claude-sonnet-4.6"`), which bypasses analysis entirely
+3. `FallbackChain` tries models in priority order; retries on failure
+4. Provider forwards to AI service; response serialized + stats recorded
 
-- `config::parser::tests` — TOML parsing, env expansion, validation
-- `config::parser::mutation_tests` — Config mutations, duplicate detection (added 3 new tests)
-- `provider::factory::tests` — Create providers, error handling
-- `utils::stats::tests` — Request tracking, aggregation
-- `router::*` — Routing engine, fallback chains
-- `analyzer::*` — Model scoring (FastAnalyzer 15D)
-- `tui::auth::tests` — Auth UI state machine
-- `integration_tests.rs` — Full config round-trip, multi-provider scenarios
-
-**Run tests:**
-
-```bash
-cargo test --lib           # Unit tests only (47 passing)
-cargo test                 # All tests (54 passing)
-cargo test config::        # Test specific module
-cargo test -- --nocapture  # Show println! output
-```
+**Direct routing bypass**: Set `"model": "github_copilot:claude-sonnet-4.6"` in the request. The colon-separated prefix is consumed in `router/engine.rs`; the stripped model name is forwarded to the provider.
 
 ## Critical Code Locations
 
-| Task                 | File                                                                                | Lines |
-| -------------------- | ----------------------------------------------------------------------------------- | ----- |
-| Add new provider     | `src/provider/{name}.rs` + register in `factory.rs:create_provider()`               | —     |
-| Add HTTP endpoint    | `src/server/mod.rs:start_server()` + handler                                        | —     |
-| Change config schema | `src/config/mod.rs` (structs), `parser.rs` (parsing), `config.example.toml` (docs)  | —     |
-| Fix build errors     | Check `cargo test` output; integration test expects `system` field in `ChatRequest` | —     |
-| Add test             | Same file as code under `#[cfg(test)] mod tests`                                    | —     |
-| Debug logging        | `utils::init_logger()` sets up tracing; use `info!`, `debug!`, `error!` macros      | —     |
-
-## Build & Deployment Notes
-
-- **Binary name**: `yolo-router` (from `Cargo.toml` `[package] name`)
-- **Executable location after build**: `target/release/yolo-router`
-- **Config loading order**: `--config` flag → `YOLO_CONFIG` env var → `config.toml` (current dir)
-- **Log level control**: `[daemon] log_level` in config or `RUST_LOG` env var (tracing-subscriber)
-- **Port binding**: Configured in `[daemon] port` (default 8989)
+| Task | File |
+|------|------|
+| Add provider | `src/provider/{name}.rs` + `factory.rs:create_provider()` + `config/mod.rs:ProviderConfig` |
+| Add endpoint | `src/server/mod.rs:start_server()` + handler; handler gets `AppState` |
+| Change config schema | `config/mod.rs` (structs) + `parser.rs` (if Serde can't auto-handle) + `config.example.toml` |
+| Add test | Inline `#[cfg(test)] mod tests` in same file; integration tests in `tests/integration_tests.rs` |
+| Debug logging | `info!`, `debug!`, `error!` macros (tracing) |
 
 ## Common Pitfalls
 
-1. **Claude Code `system` field error** — `invalid type: sequence, expected a string` means Claude Code is sending system as a content blocks array (not a string). **Fixed in latest version**; system field now supports both formats. Ensure you're running the latest build.
-2. **Duplicate model entries in TUI** — When re-selecting the same provider/model/cost_tier in TUI, the system now rejects duplicates with a clear error message. This prevents configuration pollution. To add the same model with a different cost tier or in a different scenario, use a different cost_tier or scenario name.
-3. **Config not loading** — Check env vars are exported (`export ANTHROPIC_API_KEY="***"`) and config file path is correct
-4. **Provider returns error** — In dev, providers return placeholder responses. To integrate real APIs, update `src/provider/{name}.rs:send_request()`
-5. **TUI auth doesn't persist** — Auth credentials are saved to `~/.config/yolo-router/providers.json` (see `tui/auth.rs` for path); ensure directory exists
-6. **Port already in use** — Change `[daemon] port` in config or kill existing process
-7. **`provider:model` routing ignored** — Direct routing (`github_copilot:gpt-5-mini`) must be checked BEFORE auto-routing in `router/engine.rs:route()`. If auto-routing runs first, analyzer may match a default scenario and hijack the request. The `provider:model` split also must strip the prefix before forwarding (set `req.model = model_parts[1]`)
-8. **GitHub Copilot API type mismatch** — `CopilotToken.expires_at` comes as integer Unix timestamp but was declared `Option<String>`. Use custom `deserialize_optional_int_as_string` deserializer to handle both formats (`src/provider/github_copilot.rs`)
-9. **Clippy warnings** — Run `cargo clippy --fix --lib -p yolo-router --allow-dirty --allow-staged` to auto-fix. Common: redundant closures, `io::Error::other()`, useless `format!()`
+- **`system` field**: Claude Code sends `system` as a content-blocks array, not a string. Current code handles both. If you see `invalid type: sequence, expected a string`, rebuild from latest.
+- **`provider:model` bypass**: Direct routing check in `engine.rs` must run BEFORE scenario analysis. If you add code before the prefix check, auto-routing can hijack the request.
+- **GitHub Copilot `expires_at`**: Comes as an integer Unix timestamp but typed as `Option<String>`. Uses `deserialize_optional_int_as_string` custom deserializer in `github_copilot.rs`.
+- **Auth persistence**: GitHub token → `~/.config/yolo-router/github_token`; Codex → `~/.config/yolo-router/codex_oauth.json`. Directory must exist.
+- **`reqwest` is 0.11**: Not 0.12 — the API surface differs; do not upgrade without checking breaking changes.
+- **`ratatui` + `crossterm` version lock**: `ratatui 0.26` requires `crossterm 0.27`. Keep them paired.
+- **Duplicate scenario models**: TUI rejects duplicate `(provider, model, cost_tier)` entries. Use different `cost_tier` or different scenario to add the same model twice.
+- **Clippy in CI**: `-- -D warnings` treats all warnings as errors. Run `cargo clippy --all-targets --release -- -D warnings` locally before pushing.
+- **`cargo audit`/`cargo-tarpaulin`** are not installed by default — install before local use; CI installs them in the workflow.
 
-## Why Features Exist
+## Key Dependencies
 
-| Feature                    | Why                                                                               | File                           |
-| -------------------------- | --------------------------------------------------------------------------------- | ------------------------------ |
-| **15D FastAnalyzer**       | Auto-select best model without hardcoding routes; saves ~40% cost vs static rules | `analyzer/multidimensional.rs` |
-| **Fallback chains**        | Ensure reliability when a provider fails or quota exhausted                       | `router/fallback.rs`           |
-| **Env var expansion**      | Don't commit secrets; rely on deployment env                                      | `config/parser.rs`             |
-| **Scenario-based routing** | Different tasks (coding vs. general) benefit from different models/costs          | `router/engine.rs`             |
-| **TOML config**            | Human-friendly, no code changes needed to retune models                           | `config/mod.rs`                |
-| **TUI auth**               | Interactive provider auth without editing config files                            | `tui/auth.rs`                  |
-| **Stats endpoint**         | Monitor which providers are being called; detect issues                           | `utils/stats.rs`               |
+| Crate | Version | Note |
+|-------|---------|------|
+| `actix-web` | 4.4 | HTTP server |
+| `tokio` | 1.35 | Async runtime (features=["full"]) |
+| `reqwest` | 0.11 | HTTP client — **not 0.12** |
+| `ratatui` | 0.26 | TUI — must pair with crossterm 0.27 |
+| `async-trait` | 0.1 | Required for `Provider` trait async methods |
+| `oauth2` | 4.4 | Device flow for Codex/GitHub Copilot |
+| `dotenv` | 0.15 | Auto-loads `.env` in CWD |
 
-## Extending the System
+## CI Overview
 
-### Add a New Provider
+Four workflows in `.github/workflows/`:
+- **`ci.yml`**: `test` + `fmt` + `clippy` + `security` + `coverage` (ubuntu/macos/windows matrix)
+- **`build.yml`**: Cross-platform artifact builds for linux-amd64, darwin-amd64, darwin-arm64, windows-amd64
+- **`release.yml`**: Triggered by `v*` tags → builds all platforms + creates GitHub Release
+- **`validate.yml`**: Validates workflow YAML files on changes to `.github/workflows/`
 
-1. Create `src/provider/{name}.rs` with `impl Provider` (trait requires `send_request()`)
-2. Add creation logic to `src/provider/factory.rs:create_provider()` match statement
-3. Add config struct to `src/config/mod.rs:ProviderConfig`
-4. Update `config.example.toml` with example
-5. Write unit test in the provider file
+CI env: `CARGO_TERM_COLOR=always`, `RUST_BACKTRACE=1`. Uses `dtolnay/rust-toolchain@stable` (no pinned version).
 
-### Add a New HTTP Endpoint
+## Documentation
 
-1. Add route in `src/server/mod.rs:start_server()` using `web::post()`
-2. Create async handler function in same file or `src/server/handlers.rs`
-3. Handler receives `AppState` (contains `router`, `stats`, `config`)
-4. Return `HttpResponse` with JSON or error
-5. Write integration test in `tests/integration_tests.rs`
-
-### Modify Config Schema
-
-1. Update struct in `src/config/mod.rs`
-2. Update parsing logic in `src/config/parser.rs` if needed (Serde usually handles it)
-3. Update `config.example.toml` and `config.toml` examples
-4. Write test in `config::parser::tests`
-
-## Performance & Limits
-
-- **Startup time**: ~500ms to 1s (includes config parsing)
-- **Request handling**: 1-3s typical (depends on provider latency, not YoloRouter)
-- **Memory**: ~50MB resident
-- **Concurrent requests**: Actix-web default (num_cpus × 2 workers)
-- **Stats buffer**: Tracks last 1000 requests; older entries dropped
-- **Config reload**: Requires daemon restart (hot-reload not yet implemented)
-
-## Dependencies to Know
-
-| Crate            | Purpose                          | Version |
-| ---------------- | -------------------------------- | ------- |
-| `actix-web`      | HTTP server framework            | 4.4     |
-| `tokio`          | Async runtime                    | 1.35    |
-| `serde` + `toml` | Config serialization             | 1.0     |
-| `reqwest`        | HTTP client (for provider calls) | 0.11    |
-| `ratatui`        | Terminal UI rendering            | 0.26    |
-| `tracing`        | Structured logging               | 0.1     |
-| `thiserror`      | Error definitions                | 1.0     |
-
-## Documentation Pointers
-
-- **USER_GUIDE.md** — Full user docs (config examples, API endpoints, troubleshooting)
-- **CLAUDE_CODE_SETUP.md** — Complete Claude Code integration guide with troubleshooting
-- **.github/copilot-instructions.md** — Architecture & phases overview
-- **PROJECT_SUMMARY.md** — Detailed feature list & test summary
-- **README.md** — Project intro, quick start, features
-
-## Getting Unstuck
-
-- **Build fails?** Run `cargo check` first to see syntax errors; then `cargo build`
-- **Test fails?** Run `cargo test -- --nocapture` to see println! output
-- **Config doesn't load?** Check file exists and has valid TOML syntax (`toml-cli validate config.toml` or try in an online validator)
-- **Endpoint 404?** Verify route registered in `src/server/mod.rs` and server is running
-- **Auth not saving?** Check `~/.config/yolo-router/` directory exists and is writable
+- `USER_GUIDE.md` — Full user docs, config examples, API endpoints
+- `CLAUDE_CODE_SETUP.md` — Claude Code integration + troubleshooting
+- `.github/copilot-instructions.md` — Architecture & phases overview
+- `config.example.toml` — Canonical config reference
 
 ---
-
-**Last updated**: 2024 | **Rust edition**: 2021 | **MSRV**: 1.70+
+**Rust edition**: 2021 | **MSRV**: 1.70+
