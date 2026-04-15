@@ -15,12 +15,14 @@ pub use health::ProviderHealthTracker;
 
 pub struct Router {
     engine: RwLock<RoutingEngine>,
+    tracker: Arc<ProviderHealthTracker>,
 }
 
 impl Router {
     pub fn new(engine: RoutingEngine) -> Self {
         Self {
             engine: RwLock::new(engine),
+            tracker: Arc::new(ProviderHealthTracker::new()),
         }
     }
 
@@ -30,7 +32,7 @@ impl Router {
         scenario: Option<&str>,
     ) -> Result<ChatResponse> {
         let engine = self.engine.read().await;
-        engine.route(request, scenario).await
+        engine.route(request, scenario, &self.tracker).await
     }
 
     /// Select the best model for a request without executing it.
@@ -45,6 +47,7 @@ impl Router {
     }
 
     pub async fn reload(&self, config: &Config) -> Result<()> {
+        // Rebuild engine only; tracker (cooldown state) is preserved across reloads
         let new_engine = RoutingEngine::new_with_config(config.clone())?;
         *self.engine.write().await = new_engine;
         Ok(())

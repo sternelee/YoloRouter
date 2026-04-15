@@ -48,6 +48,7 @@ impl RoutingEngine {
         &self,
         request: &ChatRequest,
         scenario: Option<&str>,
+        tracker: &crate::router::ProviderHealthTracker,
     ) -> Result<ChatResponse> {
         let config = self.config.read().await;
         let routing_config = config.routing();
@@ -56,7 +57,7 @@ impl RoutingEngine {
         // Explicit scenario wins immediately
         if let Some(scenario_name) = scenario {
             return self
-                .route_via_scenario(request, scenario_name, &config, timeout_duration)
+                .route_via_scenario(request, scenario_name, &config, timeout_duration, tracker)
                 .await;
         }
 
@@ -136,7 +137,7 @@ impl RoutingEngine {
                 routing_config.confidence_threshold,
             ) {
                 return self
-                    .route_via_scenario(request, &scenario_name, &config, timeout_duration)
+                    .route_via_scenario(request, &scenario_name, &config, timeout_duration, tracker)
                     .await;
             }
         }
@@ -248,14 +249,20 @@ impl RoutingEngine {
         scenario_name: &str,
         config: &Config,
         timeout_duration: Duration,
+        tracker: &crate::router::ProviderHealthTracker,
     ) -> Result<ChatResponse> {
         let routing_config = config.routing();
         if let Ok(scenario_config) = config.get_scenario(scenario_name) {
             if routing_config.fallback_enabled {
+                let cooldown = if routing_config.cooldown_enabled {
+                    Duration::from_secs(routing_config.cooldown_secs)
+                } else {
+                    Duration::ZERO
+                };
                 let fallback = FallbackChain::new(scenario_config);
                 return timeout(
                     timeout_duration,
-                    fallback.execute(request, &self.registry, routing_config.retry_count),
+                    fallback.execute(request, &self.registry, routing_config.retry_count, tracker, cooldown),
                 )
                 .await
                 .map_err(|_| {
