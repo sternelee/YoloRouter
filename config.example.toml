@@ -32,6 +32,14 @@ type = "openai"
 base_url = "https://integrate.api.nvidia.com/v1"
 api_key = "${NVIDIA_API_KEY}"
 
+# Ollama — local inference, no API key required
+# Docs: https://ollama.com  |  Start: ollama serve
+# Pull models first: ollama pull qwen2.5-coder:7b  ollama pull llama3.3
+[providers.ollama]
+type = "openai"
+base_url = "http://127.0.0.1:11434/v1"
+api_key = "ollama"                    # Ollama ignores the key; any non-empty string works
+
 # ─── Scenarios ────────────────────────────────────────────────────────────────
 # Routing priority (highest wins when multiple match):
 #   coding(100) > reasoning(90) > chinese(80) > general(50, default)
@@ -75,6 +83,24 @@ cost_tier = "low"
 capabilities = ["code", "reasoning"]
 
 [[scenarios.coding.models]]
+provider = "openrouter"
+model = "qwen/qwen3-coder:free"                          # Coding-specialist; free OpenRouter quota
+cost_tier = "low"
+capabilities = ["code"]
+
+[[scenarios.coding.models]]
+provider = "nvidia"
+model = "deepseek-v3.2"                                  # Strong at code + reasoning; free NIM credits
+cost_tier = "low"
+capabilities = ["code", "reasoning"]
+
+[[scenarios.coding.models]]
+provider = "ollama"
+model = "qwen2.5-coder:7b"                               # Local — pull with: ollama pull qwen2.5-coder:7b
+cost_tier = "low"
+capabilities = ["code"]
+
+[[scenarios.coding.models]]
 provider = "github_copilot"
 model = "claude-opus-4.6"                                # Highest quality — only if lower tiers fail
 cost_tier = "high"
@@ -100,6 +126,30 @@ model = "gpt-5.4"
 cost_tier = "low"
 capabilities = ["reasoning"]
 
+[[scenarios.reasoning.models]]
+provider = "nvidia"
+model = "kimi-k2-thinking"                               # Chain-of-thought specialist; free NIM credits
+cost_tier = "low"
+capabilities = ["reasoning", "analysis"]
+
+[[scenarios.reasoning.models]]
+provider = "openrouter"
+model = "nvidia/nemotron-3-super-120b-a12b:free"         # 120B reasoning; free OpenRouter quota
+cost_tier = "low"
+capabilities = ["reasoning", "analysis"]
+
+[[scenarios.reasoning.models]]
+provider = "nvidia"
+model = "deepseek-v3.2"                                  # Strong reasoning; free NIM credits
+cost_tier = "low"
+capabilities = ["reasoning", "analysis"]
+
+[[scenarios.reasoning.models]]
+provider = "openrouter"
+model = "openai/gpt-oss-120b:free"                       # 120B general; free OpenRouter quota
+cost_tier = "low"
+capabilities = ["reasoning"]
+
 # ── CJK / Chinese ─────────────────────────────────────────────────────────────
 [scenarios.chinese]
 default_tier = "low"
@@ -113,6 +163,24 @@ provider = "github_copilot"
 model = "claude-sonnet-4.6"
 cost_tier = "low"
 capabilities = ["multilingual", "reasoning"]
+
+[[scenarios.chinese.models]]
+provider = "nvidia"
+model = "glm-4.7"                                        # Zhipu/Tsinghua Chinese-first; free NIM credits
+cost_tier = "low"
+capabilities = ["multilingual", "reasoning"]
+
+[[scenarios.chinese.models]]
+provider = "nvidia"
+model = "minimax-m2.7"                                   # MiniMax latest, Chinese-friendly; free NIM credits
+cost_tier = "low"
+capabilities = ["multilingual"]
+
+[[scenarios.chinese.models]]
+provider = "openrouter"
+model = "minimax/minimax-m2.5:free"                      # MiniMax via OpenRouter; free quota
+cost_tier = "low"
+capabilities = ["multilingual"]
 
 # ── General / Creative / Translation (default) ────────────────────────────────
 [scenarios.general]
@@ -130,6 +198,26 @@ cost_tier = "low"
 [[scenarios.general.models]]
 provider = "codex_oauth"
 model = "gpt-5.4-mini"   # Lightweight GPT-5 via Codex Plus
+cost_tier = "low"
+
+[[scenarios.general.models]]
+provider = "openrouter"
+model = "openai/gpt-oss-120b:free"                       # 120B general; free OpenRouter quota
+cost_tier = "low"
+
+[[scenarios.general.models]]
+provider = "openrouter"
+model = "google/gemma-4-31b-it:free"                     # Google Gemma 4; free OpenRouter quota
+cost_tier = "low"
+
+[[scenarios.general.models]]
+provider = "nvidia"
+model = "step-3.5-flash"                                 # Lightweight/fast; free NIM credits
+cost_tier = "low"
+
+[[scenarios.general.models]]
+provider = "ollama"
+model = "llama3.3:latest"                                # Local — pull with: ollama pull llama3.3
 cost_tier = "low"
 
 # ─── Routing ──────────────────────────────────────────────────────────────────
