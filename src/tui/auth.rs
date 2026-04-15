@@ -49,6 +49,13 @@ enum AuthStep {
     Complete,
 }
 
+#[derive(Debug, PartialEq, Eq)]
+enum AuthKeyAction {
+    Continue,
+    Exit,
+    Complete(String),
+}
+
 impl Default for AuthFlow {
     fn default() -> Self {
         Self::new()
@@ -134,6 +141,54 @@ impl AuthFlow {
         }
     }
 
+    fn handle_key_code(&mut self, key_code: KeyCode) -> AuthKeyAction {
+        match key_code {
+            KeyCode::Esc | KeyCode::Char('q') => AuthKeyAction::Exit,
+            KeyCode::Up if self.current_step == AuthStep::SelectProvider => {
+                self.prev_provider();
+                AuthKeyAction::Continue
+            }
+            KeyCode::Down if self.current_step == AuthStep::SelectProvider => {
+                self.next_provider();
+                AuthKeyAction::Continue
+            }
+            KeyCode::Right | KeyCode::Tab if self.current_step == AuthStep::SelectProvider => {
+                self.select_provider();
+                AuthKeyAction::Continue
+            }
+            KeyCode::Enter => {
+                if self.current_step == AuthStep::InputApiKey {
+                    self.confirm_key();
+                    AuthKeyAction::Continue
+                } else if self.current_step == AuthStep::ConfirmKey {
+                    if let Some((_, key)) = self.complete_auth() {
+                        AuthKeyAction::Complete(key)
+                    } else {
+                        AuthKeyAction::Continue
+                    }
+                } else {
+                    if self.current_step == AuthStep::SelectProvider {
+                        self.select_provider();
+                    }
+                    AuthKeyAction::Continue
+                }
+            }
+            KeyCode::Backspace => {
+                self.backspace();
+                AuthKeyAction::Continue
+            }
+            KeyCode::Char(c) if c != 'q' => {
+                self.input_char(c);
+                AuthKeyAction::Continue
+            }
+            KeyCode::Left => {
+                self.back();
+                AuthKeyAction::Continue
+            }
+            _ => AuthKeyAction::Continue,
+        }
+    }
+
     fn get_provider_help_text(&self, provider: &AuthProvider) -> &'static str {
         match provider {
             AuthProvider::Anthropic => {
@@ -168,43 +223,10 @@ pub fn run_auth_tui(provider: AuthProvider) -> io::Result<Option<String>> {
         terminal.draw(|f| ui(f, &auth_flow))?;
 
         if let Event::Key(key) = event::read()? {
-            match key.code {
-                KeyCode::Esc => break None,
-                KeyCode::Char('q') => break None,
-                KeyCode::Up => {
-                    if auth_flow.current_step == AuthStep::SelectProvider {
-                        auth_flow.prev_provider();
-                    }
-                }
-                KeyCode::Down => {
-                    if auth_flow.current_step == AuthStep::SelectProvider {
-                        auth_flow.next_provider();
-                    }
-                }
-                KeyCode::Right | KeyCode::Tab => {
-                    if auth_flow.current_step == AuthStep::SelectProvider {
-                        auth_flow.select_provider();
-                    }
-                }
-                KeyCode::Enter => {
-                    if auth_flow.current_step == AuthStep::InputApiKey {
-                        auth_flow.confirm_key();
-                    } else if auth_flow.current_step == AuthStep::ConfirmKey {
-                        if let Some((_, key)) = auth_flow.complete_auth() {
-                            break Some(key);
-                        }
-                    } else if auth_flow.current_step == AuthStep::SelectProvider {
-                        auth_flow.select_provider();
-                    }
-                }
-                KeyCode::Backspace => auth_flow.backspace(),
-                KeyCode::Char(c) => {
-                    if c != 'q' {
-                        auth_flow.input_char(c);
-                    }
-                }
-                KeyCode::Left => auth_flow.back(),
-                _ => {}
+            match auth_flow.handle_key_code(key.code) {
+                AuthKeyAction::Exit => break None,
+                AuthKeyAction::Complete(key) => break Some(key),
+                AuthKeyAction::Continue => {}
             }
         }
     };
@@ -405,5 +427,76 @@ mod tests {
 
         auth.back();
         assert_eq!(auth.current_step, AuthStep::SelectProvider);
+    }
+
+    #[test]
+    fn test_handle_key_code_navigates_only_during_provider_selection() {
+        let mut auth = AuthFlow::new();
+
+        assert_eq!(auth.handle_key_code(KeyCode::Down), AuthKeyAction::Continue);
+        assert_eq!(auth.selected_provider, 1);
+
+        assert_eq!(auth.handle_key_code(KeyCode::Up), AuthKeyAction::Continue);
+        assert_eq!(auth.selected_provider, 0);
+
+        auth.select_provider();
+        assert_eq!(auth.current_step, AuthStep::InputApiKey);
+
+        assert_eq!(auth.handle_key_code(KeyCode::Down), AuthKeyAction::Continue);
+        assert_eq!(auth.selected_provider, 0);
+    }
+
+    #[test]
+    fn test_handle_key_code_tab_selects_provider_and_enter_completes_auth() {
+        let mut auth = AuthFlow::new();
+
+        assert_eq!(auth.handle_key_code(KeyCode::Tab), AuthKeyAction::Continue);
+        assert_eq!(auth.current_step, AuthStep::InputApiKey);
+
+        assert_eq!(
+            auth.handle_key_code(KeyCode::Char('s')),
+            AuthKeyAction::Continue
+        );
+        assert_eq!(
+            auth.handle_key_code(KeyCode::Char('k')),
+            AuthKeyAction::Continue
+        );
+        assert_eq!(auth.api_key_input, "sk");
+
+        assert_eq!(
+            auth.handle_key_code(KeyCode::Enter),
+            AuthKeyAction::Continue
+        );
+        assert_eq!(auth.current_step, AuthStep::ConfirmKey);
+
+        assert_eq!(
+            auth.handle_key_code(KeyCode::Enter),
+            AuthKeyAction::Complete("sk".to_string())
+        );
+        assert_eq!(auth.current_step, AuthStep::Complete);
+    }
+
+    #[test]
+    fn test_handle_key_code_q_exits_and_other_chars_follow_input_rules() {
+        let mut auth = AuthFlow::new();
+
+        assert_eq!(
+            auth.handle_key_code(KeyCode::Char('q')),
+            AuthKeyAction::Exit
+        );
+        assert_eq!(auth.api_key_input, "");
+
+        assert_eq!(
+            auth.handle_key_code(KeyCode::Char('a')),
+            AuthKeyAction::Continue
+        );
+        assert_eq!(auth.api_key_input, "");
+
+        auth.select_provider();
+        assert_eq!(
+            auth.handle_key_code(KeyCode::Char('a')),
+            AuthKeyAction::Continue
+        );
+        assert_eq!(auth.api_key_input, "a");
     }
 }
