@@ -365,25 +365,6 @@ impl Provider for GitHubCopilotProvider {
     }
 
     fn model_list(&self) -> Vec<String> {
-        vec![
-            // GPT-5 series (latest frontier agentic models)
-            "gpt-5.4".to_string(), // Current - Latest frontier agentic coding model
-            "gpt-5.4-mini".to_string(), // Smaller frontier agentic coding model
-            "gpt-5.3-codex".to_string(), // Frontier Codex-optimized agentic coding model
-            "gpt-5.2".to_string(), // Optimized for professional work and long-running agents
-            "gpt-5.2-codex".to_string(), // Codex variant for code-focused tasks
-            "gpt-5.1".to_string(), // Previous stable release
-            "gpt-5-mini".to_string(), // Lightweight GPT-5 variant
-            // GPT-4 series (stable, proven)
-            "gpt-4.1".to_string(),     // Latest GPT-4 iteration
-            "gpt-4o".to_string(),      // GPT-4 optimized
-            "gpt-4-turbo".to_string(), // High-performance variant
-            // Claude series (Anthropic)
-            "claude-opus-4.6".to_string(), // Latest Opus - best reasoning
-            "claude-opus-4.5".to_string(), // Previous Opus version
-            "claude-sonnet-4.6".to_string(), // Latest Sonnet - balanced
-            "claude-sonnet-4.5".to_string(), // Previous Sonnet version
-            "claude-haiku-4.5".to_string(), // Fast & lightweight
-        ]
+        crate::provider::models::static_provider_models("github_copilot").unwrap_or_default()
     }
 }

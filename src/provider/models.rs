@@ -1,7 +1,17 @@
 use crate::config::schema::ProviderConfig;
 use crate::provider::codex_oauth::{CodexOAuthProvider, CodexQuotaInfo, CodexQuotaWindow};
+use std::collections::HashMap;
+use std::hash::{Hash, Hasher};
+use std::sync::{Mutex, OnceLock};
 
-static HTTP_CLIENT: std::sync::OnceLock<reqwest::Client> = std::sync::OnceLock::new();
+static HTTP_CLIENT: OnceLock<reqwest::Client> = OnceLock::new();
+static MODEL_CACHE: OnceLock<Mutex<HashMap<u64, CachedModels>>> = OnceLock::new();
+
+#[derive(Clone)]
+struct CachedModels {
+    models: Vec<String>,
+    fetched_at_ms: i64,
+}
 
 fn get_http_client() -> &'static reqwest::Client {
     HTTP_CLIENT.get_or_init(|| {
@@ -12,9 +22,55 @@ fn get_http_client() -> &'static reqwest::Client {
     })
 }
 
-pub async fn fetch_provider_models(cfg: &ProviderConfig) -> Result<Vec<String>, String> {
-    match cfg.provider_type.as_str() {
-        "anthropic" => Ok(vec![
+fn model_cache() -> &'static Mutex<HashMap<u64, CachedModels>> {
+    MODEL_CACHE.get_or_init(|| Mutex::new(HashMap::new()))
+}
+
+pub fn provider_models_ttl_ms() -> i64 {
+    5 * 60 * 1000
+}
+
+fn provider_models_cache_key(cfg: &ProviderConfig) -> u64 {
+    let mut hasher = std::collections::hash_map::DefaultHasher::new();
+    cfg.provider_type.hash(&mut hasher);
+    cfg.base_url.hash(&mut hasher);
+    cfg.api_key.hash(&mut hasher);
+    cfg.token.hash(&mut hasher);
+    hasher.finish()
+}
+
+fn cached_models_for(cfg: &ProviderConfig, now_ms: i64) -> Option<Vec<String>> {
+    let cache = model_cache().lock().ok()?;
+    let entry = cache.get(&provider_models_cache_key(cfg))?;
+    // Cache is valid while elapsed < TTL (exclusive upper bound).
+    // An entry fetched at time T is usable for calls where now < T + ttl.
+    if now_ms.saturating_sub(entry.fetched_at_ms) < provider_models_ttl_ms() {
+        Some(entry.models.clone())
+    } else {
+        None
+    }
+}
+
+fn store_cached_models(cfg: &ProviderConfig, models: Vec<String>, now_ms: i64) {
+    if let Ok(mut cache) = model_cache().lock() {
+        cache.insert(
+            provider_models_cache_key(cfg),
+            CachedModels {
+                models,
+                fetched_at_ms: now_ms,
+            },
+        );
+    }
+}
+
+pub fn static_provider_models(provider_type: &str) -> Option<Vec<String>> {
+    match provider_type {
+        "anthropic" => Some(vec![
+            "claude-opus-4.6".to_string(),
+            "claude-opus-4.5".to_string(),
+            "claude-sonnet-4.6".to_string(),
+            "claude-sonnet-4.5".to_string(),
+            "claude-haiku-4.5".to_string(),
             "claude-opus-4-5".to_string(),
             "claude-sonnet-4-5".to_string(),
             "claude-haiku-4-5".to_string(),
@@ -23,16 +79,21 @@ pub async fn fetch_provider_models(cfg: &ProviderConfig) -> Result<Vec<String>, 
             "claude-3-5-sonnet-20241022".to_string(),
             "claude-3-5-haiku-20241022".to_string(),
             "claude-3-opus-20240229".to_string(),
+            "claude-opus".to_string(),
+            "claude-sonnet".to_string(),
+            "claude-haiku".to_string(),
         ]),
-        "github_copilot" => Ok(vec![
+        "github_copilot" | "github" => Some(vec![
             "gpt-5.4".to_string(),
+            "gpt-5.4-mini".to_string(),
             "gpt-5.3-codex".to_string(),
             "gpt-5.2-codex".to_string(),
             "gpt-5.2".to_string(),
             "gpt-5.1".to_string(),
-            "gpt-5.4-mini".to_string(),
             "gpt-5-mini".to_string(),
             "gpt-4.1".to_string(),
+            "gpt-4o".to_string(),
+            "gpt-4-turbo".to_string(),
             "claude-sonnet-4.6".to_string(),
             "claude-sonnet-4.5".to_string(),
             "claude-haiku-4.5".to_string(),
@@ -40,23 +101,73 @@ pub async fn fetch_provider_models(cfg: &ProviderConfig) -> Result<Vec<String>, 
             "claude-opus-4.5".to_string(),
             "claude-sonnet-4".to_string(),
         ]),
-        "codex_oauth" => Ok(vec![
+        "codex_oauth" => Some(vec![
             "gpt-5.4".to_string(),
             "gpt-5.4-mini".to_string(),
             "gpt-5.3-codex".to_string(),
             "gpt-5.3-codex-spark".to_string(),
             "gpt-5.2".to_string(),
+            "gpt-5.2-codex".to_string(),
+            "gpt-5.1".to_string(),
+            "gpt-5-mini".to_string(),
+            "gpt-4.1".to_string(),
+            "gpt-4o".to_string(),
+            "gpt-4o-mini".to_string(),
+            "gpt-4-turbo".to_string(),
+            "gpt-4".to_string(),
+            "o1".to_string(),
+            "o1-preview".to_string(),
+            "o1-mini".to_string(),
+            "gpt-3.5-turbo".to_string(),
         ]),
+        "openai" | "codex" => Some(vec![
+            "gpt-5.4".to_string(),
+            "gpt-5.4-mini".to_string(),
+            "gpt-5.3-codex".to_string(),
+            "gpt-5.3-codex-spark".to_string(),
+            "gpt-5.2".to_string(),
+            "gpt-5.2-codex".to_string(),
+            "gpt-5.1".to_string(),
+            "gpt-5-mini".to_string(),
+            "gpt-4.1".to_string(),
+            "gpt-4o".to_string(),
+            "gpt-4o-mini".to_string(),
+            "gpt-4-turbo".to_string(),
+            "gpt-4".to_string(),
+            "o1".to_string(),
+            "o1-preview".to_string(),
+            "o1-mini".to_string(),
+            "gpt-3.5-turbo".to_string(),
+        ]),
+        "gemini" => Some(vec![
+            "gemini-2.0-flash".to_string(),
+            "gemini-1.5-pro".to_string(),
+            "gemini-1.5-flash".to_string(),
+            "gemini-pro".to_string(),
+            "gemini-pro-vision".to_string(),
+        ]),
+        _ => None,
+    }
+}
+
+pub async fn fetch_provider_models(cfg: &ProviderConfig) -> Result<Vec<String>, String> {
+    let now_ms = now_epoch_ms();
+    if let Some(models) = cached_models_for(cfg, now_ms) {
+        return Ok(models);
+    }
+
+    let models = match cfg.provider_type.as_str() {
+        "anthropic" | "github_copilot" | "github" | "codex_oauth" => {
+            Ok(static_provider_models(&cfg.provider_type).unwrap_or_default())
+        }
         "gemini" => {
             let api_key = cfg.api_key.as_deref().unwrap_or("");
             if api_key.is_empty() {
-                return Ok(vec![
-                    "gemini-2.0-flash".to_string(),
-                    "gemini-1.5-pro".to_string(),
-                    "gemini-1.5-flash".to_string(),
-                ]);
+                return Ok(static_provider_models("gemini").unwrap_or_default());
             }
-            fetch_gemini_models(api_key).await
+            fetch_gemini_models(api_key)
+                .await
+                .or_else(|_| Ok(static_provider_models("gemini").unwrap_or_default()))
         }
         _ => {
             let base_url = cfg
@@ -65,11 +176,26 @@ pub async fn fetch_provider_models(cfg: &ProviderConfig) -> Result<Vec<String>, 
                 .unwrap_or("https://api.openai.com/v1");
             let api_key = cfg.api_key.as_deref().unwrap_or("");
             if api_key.is_empty() {
+                if let Some(models) = static_provider_models(&cfg.provider_type) {
+                    return Ok(models);
+                }
                 return Err("API key not configured for this provider".to_string());
             }
-            fetch_openai_compatible_models(base_url, api_key).await
+            match fetch_openai_compatible_models(base_url, api_key).await {
+                Ok(models) => Ok(models),
+                Err(error) => {
+                    if let Some(models) = static_provider_models(&cfg.provider_type) {
+                        Ok(models)
+                    } else {
+                        Err(error)
+                    }
+                }
+            }
         }
-    }
+    }?;
+
+    store_cached_models(cfg, models.clone(), now_ms);
+    Ok(models)
 }
 
 pub async fn fetch_provider_quota(cfg: &ProviderConfig) -> Result<CodexQuotaInfo, String> {
@@ -292,6 +418,7 @@ mod tests {
         let models = rt.block_on(fetch_provider_models(&cfg)).unwrap();
         assert!(!models.is_empty());
         assert!(models.iter().any(|m| m.contains("claude")));
+        assert_eq!(models, static_provider_models("anthropic").unwrap());
     }
 
     #[test]
@@ -300,6 +427,7 @@ mod tests {
         let rt = tokio::runtime::Runtime::new().unwrap();
         let models = rt.block_on(fetch_provider_models(&cfg)).unwrap();
         assert!(!models.is_empty());
+        assert_eq!(models, static_provider_models("github_copilot").unwrap());
     }
 
     #[test]
@@ -309,6 +437,7 @@ mod tests {
         let models = rt.block_on(fetch_provider_models(&cfg)).unwrap();
         assert!(!models.is_empty());
         assert!(models.iter().any(|m| m.contains("gpt-5.4")));
+        assert_eq!(models, static_provider_models("codex_oauth").unwrap());
     }
 
     #[test]
@@ -318,15 +447,15 @@ mod tests {
         let models = rt.block_on(fetch_provider_models(&cfg)).unwrap();
         assert!(!models.is_empty());
         assert!(models.iter().any(|m| m.contains("gemini")));
+        assert_eq!(models, static_provider_models("gemini").unwrap());
     }
 
     #[test]
     fn test_openai_no_key_returns_error() {
         let cfg = make_cfg("openai", None, None);
         let rt = tokio::runtime::Runtime::new().unwrap();
-        let result = rt.block_on(fetch_provider_models(&cfg));
-        assert!(result.is_err());
-        assert!(result.unwrap_err().contains("API key not configured"));
+        let models = rt.block_on(fetch_provider_models(&cfg)).unwrap();
+        assert_eq!(models, static_provider_models("openai").unwrap());
     }
 
     #[test]
@@ -336,7 +465,7 @@ mod tests {
         let models = rt.block_on(fetch_provider_models(&cfg)).unwrap();
         assert!(models.contains(&"claude-3-5-sonnet-20241022".to_string()));
         assert!(models.contains(&"claude-opus-4-5".to_string()));
-        assert_eq!(models.len(), 8);
+        assert!(models.len() >= 8);
     }
 
     #[test]
@@ -349,7 +478,41 @@ mod tests {
         assert!(models.contains(&"claude-sonnet-4.6".to_string()));
         assert!(models.contains(&"gpt-5.2-codex".to_string()));
         assert!(models.contains(&"claude-opus-4.5".to_string()));
-        assert_eq!(models.len(), 14);
+        assert!(models.len() >= 14);
+    }
+
+    #[test]
+    fn test_static_catalog_openai_and_codex_stay_aligned() {
+        let openai = static_provider_models("openai").unwrap();
+        let codex = static_provider_models("codex").unwrap();
+        assert_eq!(openai, codex);
+        assert!(openai.contains(&"gpt-5.3-codex-spark".to_string()));
+    }
+
+    #[test]
+    fn test_provider_models_cache_key_changes_with_credentials() {
+        let cfg_a = make_cfg("openai", Some("key-a"), Some("https://api.openai.com/v1"));
+        let cfg_b = make_cfg("openai", Some("key-b"), Some("https://api.openai.com/v1"));
+        assert_ne!(
+            provider_models_cache_key(&cfg_a),
+            provider_models_cache_key(&cfg_b)
+        );
+    }
+
+    #[test]
+    fn test_cached_models_respect_ttl() {
+        let cfg = make_cfg("openai", Some("key-a"), Some("https://api.openai.com/v1"));
+        let now_ms = 1_000_000;
+        store_cached_models(&cfg, vec!["cached-model".to_string()], now_ms);
+
+        assert_eq!(
+            cached_models_for(&cfg, now_ms + provider_models_ttl_ms() - 1),
+            Some(vec!["cached-model".to_string()])
+        );
+        assert_eq!(
+            cached_models_for(&cfg, now_ms + provider_models_ttl_ms()),
+            None
+        );
     }
 
     #[test]

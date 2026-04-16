@@ -35,7 +35,11 @@ impl ProviderFactory {
                 let api_key = config.api_key.clone().ok_or_else(|| {
                     YoloRouterError::ConfigError("Missing api_key for gemini provider".to_string())
                 })?;
-                Ok(Arc::new(GeminiProvider::new(api_key)))
+                let mut p = GeminiProvider::new(api_key);
+                if let Some(base_url) = &config.base_url {
+                    p = p.with_base_url(base_url.clone());
+                }
+                Ok(Arc::new(p))
             }
             "github_copilot" | "github" => {
                 // Prefer token (long-lived GitHub OAuth token), fall back to api_key
@@ -135,11 +139,22 @@ impl ProviderFactory {
                             config.provider_type
                         ))
                     })?;
+                let models = config
+                    .extra
+                    .get("models")
+                    .and_then(|value| value.as_array())
+                    .map(|items| {
+                        items
+                            .iter()
+                            .filter_map(|item| item.as_str().map(str::to_string))
+                            .collect::<Vec<_>>()
+                    })
+                    .unwrap_or_default();
                 Ok(Arc::new(GenericProvider::new(
                     name.to_string(),
                     api_key,
                     base_url,
-                    vec![],
+                    models,
                 )))
             }
         }
@@ -225,5 +240,33 @@ mod tests {
         assert_eq!(provider.name(), "github_copilot");
 
         let _ = std::fs::remove_file(token_path);
+    }
+
+    #[test]
+    fn test_create_generic_provider_uses_configured_models() {
+        let mut extra = HashMap::new();
+        extra.insert(
+            "models".to_string(),
+            toml::Value::Array(vec![
+                toml::Value::String("model-a".to_string()),
+                toml::Value::String("model-b".to_string()),
+            ]),
+        );
+
+        let config = ProviderConfig {
+            provider_type: "custom".to_string(),
+            api_key: Some("test-key".to_string()),
+            auth_type: None,
+            token: None,
+            base_url: Some("https://example.com/v1".to_string()),
+            extra,
+        };
+
+        let provider = ProviderFactory::create_provider("custom", &config).unwrap();
+        assert_eq!(provider.name(), "custom");
+        assert_eq!(
+            provider.model_list(),
+            vec!["model-a".to_string(), "model-b".to_string()]
+        );
     }
 }

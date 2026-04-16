@@ -117,6 +117,6 @@ impl Provider for GeminiProvider {
     }
 
     fn model_list(&self) -> Vec<String> {
-        vec!["gemini-pro".to_string(), "gemini-pro-vision".to_string()]
+        crate::provider::models::static_provider_models("gemini").unwrap_or_default()
     }
 }

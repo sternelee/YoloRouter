@@ -220,7 +220,7 @@ impl FastAnalyzer {
             };
         }
 
-        let base_score = if let Some(perf) = self.model_perf.get(&c.id) {
+        let base_score = if let Some(perf) = self.model_perf.get(&c.model) {
             self.weighted_score(perf, a)
         } else {
             self.heuristic_score(c, a)
@@ -228,7 +228,7 @@ impl FastAnalyzer {
 
         let estimated_cost = self
             .model_costs
-            .get(&c.id)
+            .get(&c.model)
             .map(|mc| {
                 (a.features.estimated_tokens as f32 / 1_000_000.0) * mc.input_price_per_1m_tokens
                     + (500.0 / 1_000_000.0) * mc.output_price_per_1m_tokens
@@ -955,6 +955,73 @@ pub fn match_scenario(
     })
 }
 
+/// Returns the best scenario name using both scenario filters and model scores.
+/// The selected scenario must match task/language filters; among matches, the
+/// scenario whose configured models have the best score wins. Priority breaks ties.
+pub fn match_scenario_by_model_scores(
+    analysis: &RequestAnalysis,
+    scenario_metadata: &[ScenarioMeta<'_>],
+    scenario_model_ids: &HashMap<String, Vec<String>>,
+    model_scores: &[ModelScore],
+    confidence_threshold: f32,
+) -> Option<String> {
+    if analysis.features.confidence < confidence_threshold {
+        return scenario_metadata
+            .iter()
+            .find(|(.., is_default)| *is_default)
+            .map(|(name, ..)| name.to_string());
+    }
+
+    let task_str = analysis.features.task_type.as_str();
+    let lang_str = analysis.features.language.as_str();
+    let score_by_model: HashMap<&str, f32> = model_scores
+        .iter()
+        .map(|score| (score.model_id.as_str(), score.overall_score))
+        .collect();
+
+    let mut best: Option<(&str, f32, i32)> = None;
+
+    for (name, task_types, languages, priority, _is_default) in scenario_metadata {
+        let task_match = task_types.is_empty() || task_types.iter().any(|t| t == task_str);
+        let lang_match =
+            languages.is_empty() || languages.iter().any(|l| l == lang_str || l == "mixed");
+
+        if !task_match || !lang_match {
+            continue;
+        }
+
+        let scenario_score = scenario_model_ids
+            .get(*name)
+            .into_iter()
+            .flat_map(|model_ids| model_ids.iter())
+            .filter_map(|model_id| score_by_model.get(model_id.as_str()).copied())
+            .fold(None, |best_score: Option<f32>, score| {
+                Some(best_score.map_or(score, |current| current.max(score)))
+            });
+
+        if let Some(score) = scenario_score {
+            let should_replace = match best {
+                None => true,
+                Some((_, best_score, best_priority)) => {
+                    score > best_score
+                        || ((score - best_score).abs() < f32::EPSILON && *priority > best_priority)
+                }
+            };
+
+            if should_replace {
+                best = Some((name, score, *priority));
+            }
+        }
+    }
+
+    best.map(|(name, _, _)| name.to_string()).or_else(|| {
+        scenario_metadata
+            .iter()
+            .find(|(.., is_default)| *is_default)
+            .map(|(name, ..)| name.to_string())
+    })
+}
+
 // ─── Tests ────────────────────────────────────────────────────────────────────
 
 #[cfg(test)]
@@ -1059,6 +1126,33 @@ mod tests {
     }
 
     #[test]
+    fn test_analyze_and_score_uses_model_name_for_lookup() {
+        let analyzer = FastAnalyzer::new();
+        let messages = vec![msg("Explain trade-offs in this design")];
+        let candidates = vec![ModelCandidate {
+            id: "openai/gpt-4o".to_string(),
+            provider: "openai".to_string(),
+            model: "gpt-4o".to_string(),
+            capabilities: vec!["reasoning".to_string()],
+            cost_tier: "low".to_string(),
+        }];
+
+        let (_analysis, scores) = analyzer.analyze_and_score(&messages, &candidates);
+        let score = &scores[0];
+
+        assert_eq!(score.model_id, "openai/gpt-4o");
+        assert!(
+            score.estimated_cost > 0.0,
+            "expected table-based cost lookup for known model"
+        );
+        assert!(
+            score.overall_score > 72.0,
+            "expected table-based score, got {}",
+            score.overall_score
+        );
+    }
+
+    #[test]
     fn test_scenario_matching() {
         let analysis = RequestAnalysis {
             complexity_score: 60.0,
@@ -1139,5 +1233,89 @@ mod tests {
         // Low confidence → should fall back to default scenario "general"
         let matched = match_scenario(&analysis, &metadata, 0.6);
         assert_eq!(matched, Some("general".to_string()));
+    }
+
+    #[test]
+    fn test_scenario_matching_prefers_higher_scored_matching_scenario() {
+        let analysis = RequestAnalysis {
+            complexity_score: 60.0,
+            cost_importance: 50.0,
+            latency_requirement: 50.0,
+            accuracy_requirement: 90.0,
+            throughput_requirement: 1.0,
+            cost_budget_remaining: 1000.0,
+            availability_score: 90.0,
+            cache_hit_score: 20.0,
+            geo_compliance_score: 100.0,
+            privacy_level: 30.0,
+            feature_requirement: 80.0,
+            reliability_requirement: 90.0,
+            reasoning_score: 80.0,
+            coding_score: 85.0,
+            general_knowledge_score: 65.0,
+            features: RequestFeatures {
+                language: Language::Latin,
+                task_type: TaskType::Coding,
+                estimated_tokens: 200,
+                confidence: 0.9,
+                requires_vision: false,
+                requires_tools: false,
+            },
+        };
+
+        let coding_types: Vec<String> = vec!["coding".to_string()];
+        let all_langs: Vec<String> = vec![];
+        let default_types: Vec<String> = vec![];
+        let metadata: Vec<ScenarioMeta> = vec![
+            ("cheap", &coding_types, &all_langs, 100, false),
+            ("strong", &coding_types, &all_langs, 10, false),
+            ("default", &default_types, &all_langs, 0, true),
+        ];
+
+        let scenario_model_ids = HashMap::from([
+            ("cheap".to_string(), vec!["openai/gpt-4o-mini".to_string()]),
+            ("strong".to_string(), vec!["openai/gpt-4o".to_string()]),
+            (
+                "default".to_string(),
+                vec!["openai/gpt-3.5-turbo".to_string()],
+            ),
+        ]);
+
+        let model_scores = vec![
+            ModelScore {
+                model_id: "openai/gpt-4o-mini".to_string(),
+                overall_score: 60.0,
+                estimated_cost: 0.0,
+                estimated_latency_ms: 0.0,
+                meets_constraints: true,
+                reasoning: "cheap".to_string(),
+            },
+            ModelScore {
+                model_id: "openai/gpt-4o".to_string(),
+                overall_score: 95.0,
+                estimated_cost: 0.0,
+                estimated_latency_ms: 0.0,
+                meets_constraints: true,
+                reasoning: "strong".to_string(),
+            },
+            ModelScore {
+                model_id: "openai/gpt-3.5-turbo".to_string(),
+                overall_score: 40.0,
+                estimated_cost: 0.0,
+                estimated_latency_ms: 0.0,
+                meets_constraints: true,
+                reasoning: "default".to_string(),
+            },
+        ];
+
+        let matched = match_scenario_by_model_scores(
+            &analysis,
+            &metadata,
+            &scenario_model_ids,
+            &model_scores,
+            0.6,
+        );
+
+        assert_eq!(matched, Some("strong".to_string()));
     }
 }

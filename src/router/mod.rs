@@ -57,6 +57,11 @@ impl Router {
         let engine = self.engine.read().await;
         engine.registry().list()
     }
+
+    pub async fn provider(&self, name: &str) -> Option<Arc<dyn Provider>> {
+        let engine = self.engine.read().await;
+        engine.registry().get(name).cloned()
+    }
 }
 
 pub struct ProviderRegistry {

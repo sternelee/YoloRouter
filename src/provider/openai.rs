@@ -128,6 +128,6 @@ impl Provider for OpenAIProvider {
     }
 
     fn model_list(&self) -> Vec<String> {
-        vec!["gpt-4".to_string(), "gpt-3.5-turbo".to_string()]
+        crate::provider::models::static_provider_models("openai").unwrap_or_default()
     }
 }

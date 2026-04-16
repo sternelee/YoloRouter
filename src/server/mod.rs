@@ -1,7 +1,6 @@
 use crate::models::{
     AnthropicError, AnthropicErrorDetail, AnthropicRequest, AnthropicResponse, ChatRequest,
 };
-use crate::provider::AnthropicProvider;
 use crate::router::{Router, RoutingEngine};
 use crate::utils::StatsCollector;
 use crate::Result;
@@ -273,22 +272,6 @@ fn anthropic_error_response(
     })
 }
 
-async fn create_anthropic_provider(state: &AppState) -> Result<AnthropicProvider> {
-    let config = state.config.read().await;
-    let provider_config = config.get_provider("anthropic")?;
-    let api_key = provider_config.api_key.ok_or_else(|| {
-        crate::error::YoloRouterError::ConfigError(
-            "Missing api_key for anthropic provider".to_string(),
-        )
-    })?;
-
-    let mut provider = AnthropicProvider::new(api_key);
-    if let Some(base_url) = provider_config.base_url {
-        provider = provider.with_base_url(base_url);
-    }
-    Ok(provider)
-}
-
 fn streaming_target_is_supported(model: &str) -> bool {
     if model.is_empty() {
         return false;
@@ -400,26 +383,9 @@ async fn proxy_generic_stream(
         (endpoint.to_string(), model.clone())
     };
 
-    // Get the provider
-    let config = state.config.read().await;
-    let provider = match config.get_provider(&provider_name) {
-        Ok(provider_config) => {
-            match crate::provider::ProviderFactory::create_provider(
-                &provider_name,
-                &provider_config,
-            ) {
-                Ok(p) => p,
-                Err(e) => {
-                    return HttpResponse::ServiceUnavailable().json(serde_json::json!({
-                        "error": {
-                            "message": format!("Failed to create provider '{}': {}", provider_name, e),
-                            "type": "api_error"
-                        }
-                    }));
-                }
-            }
-        }
-        Err(_) => {
+    let provider = match state.router.provider(&provider_name).await {
+        Some(provider) => provider,
+        None => {
             return HttpResponse::BadRequest().json(serde_json::json!({
                 "error": {
                     "message": format!("Provider '{}' not found", provider_name),
@@ -428,7 +394,6 @@ async fn proxy_generic_stream(
             }));
         }
     };
-    drop(config);
 
     // Check if provider supports streaming
     if !provider.supports_streaming() {
@@ -546,13 +511,13 @@ async fn proxy_anthropic_stream(
     }
 
     // Direct models route to anthropic provider
-    let provider = match create_anthropic_provider(state).await {
-        Ok(provider) => provider,
-        Err(e) => {
+    let provider = match state.router.provider("anthropic").await {
+        Some(provider) => provider,
+        None => {
             return anthropic_error_response(
                 actix_web::http::StatusCode::SERVICE_UNAVAILABLE,
                 "api_error",
-                e.to_string(),
+                "Provider 'anthropic' not found".to_string(),
             )
         }
     };

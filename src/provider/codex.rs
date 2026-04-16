@@ -143,13 +143,6 @@ impl Provider for CodexProvider {
     }
 
     fn model_list(&self) -> Vec<String> {
-        vec![
-            "o1-preview".to_string(),
-            "o1-mini".to_string(),
-            "gpt-4o".to_string(),
-            "gpt-4-turbo".to_string(),
-            "gpt-4".to_string(),
-            "gpt-3.5-turbo".to_string(),
-        ]
+        crate::provider::models::static_provider_models("codex").unwrap_or_default()
     }
 }

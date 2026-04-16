@@ -1,6 +1,6 @@
 use crate::{error::YoloRouterError, Result};
 use serde::{Deserialize, Serialize};
-use std::collections::HashMap;
+use std::collections::{HashMap, HashSet};
 use std::fs;
 use std::path::Path;
 use toml;
@@ -172,14 +172,66 @@ impl Config {
     }
 
     pub fn validate(&self) -> Result<()> {
-        // Validate that referenced providers exist
         for (scenario_name, scenario) in self.scenarios() {
+            let mut known_refs = HashSet::new();
+
             for model in &scenario.models {
                 if !self.providers().contains_key(&model.provider) {
                     return Err(YoloRouterError::ConfigError(format!(
                         "Scenario '{}' references non-existent provider '{}'",
                         scenario_name, model.provider
                     )));
+                }
+
+                known_refs.insert(model.model.clone());
+                known_refs.insert(format!("{}:{}", model.provider, model.model));
+            }
+
+            if let Some(default_tier) = &scenario.default_tier {
+                let tier_exists = scenario
+                    .models
+                    .iter()
+                    .any(|model| model.cost_tier.as_deref() == Some(default_tier.as_str()));
+                if !tier_exists {
+                    return Err(YoloRouterError::ConfigError(format!(
+                        "Scenario '{}' has default_tier '{}' but no model uses that tier",
+                        scenario_name, default_tier
+                    )));
+                }
+            }
+
+            for (index, model) in scenario.models.iter().enumerate() {
+                if let Some(fallback_to) = &model.fallback_to {
+                    if !known_refs.contains(fallback_to) {
+                        return Err(YoloRouterError::ConfigError(format!(
+                            "Scenario '{}' model '{}:{}' points fallback_to '{}' which does not exist in the same scenario",
+                            scenario_name, model.provider, model.model, fallback_to
+                        )));
+                    }
+                }
+
+                let mut seen = HashSet::new();
+                let mut current = Some(index);
+                while let Some(current_index) = current {
+                    if !seen.insert(current_index) {
+                        return Err(YoloRouterError::ConfigError(format!(
+                            "Scenario '{}' contains a fallback_to cycle involving '{}:{}'",
+                            scenario_name,
+                            scenario.models[index].provider,
+                            scenario.models[index].model
+                        )));
+                    }
+
+                    current = scenario.models[current_index]
+                        .fallback_to
+                        .as_ref()
+                        .and_then(|target| {
+                            scenario.models.iter().position(|candidate| {
+                                candidate.model == *target
+                                    || format!("{}:{}", candidate.provider, candidate.model)
+                                        == *target
+                            })
+                        });
                 }
             }
         }
@@ -269,6 +321,59 @@ models = [
 "#;
         let config = Config::from_string(toml_str).unwrap();
         assert!(config.validate().is_err());
+    }
+
+    #[test]
+    fn test_config_validation_rejects_missing_default_tier_target() {
+        let toml_str = r#"
+[providers.openai]
+type = "openai"
+api_key = "test"
+
+[scenarios.test]
+default_tier = "low"
+models = [
+    { provider = "openai", model = "gpt-4o", cost_tier = "high" }
+]
+"#;
+        let config = Config::from_string(toml_str).unwrap();
+        let error = config.validate().unwrap_err().to_string();
+        assert!(error.contains("default_tier"));
+    }
+
+    #[test]
+    fn test_config_validation_rejects_missing_fallback_target() {
+        let toml_str = r#"
+[providers.openai]
+type = "openai"
+api_key = "test"
+
+[scenarios.test]
+models = [
+    { provider = "openai", model = "gpt-4o", fallback_to = "openai:gpt-4o-mini" }
+]
+"#;
+        let config = Config::from_string(toml_str).unwrap();
+        let error = config.validate().unwrap_err().to_string();
+        assert!(error.contains("fallback_to"));
+    }
+
+    #[test]
+    fn test_config_validation_rejects_fallback_cycles() {
+        let toml_str = r#"
+[providers.openai]
+type = "openai"
+api_key = "test"
+
+[scenarios.test]
+models = [
+    { provider = "openai", model = "gpt-4o", fallback_to = "openai:gpt-4o-mini" },
+    { provider = "openai", model = "gpt-4o-mini", fallback_to = "openai:gpt-4o" }
+]
+"#;
+        let config = Config::from_string(toml_str).unwrap();
+        let error = config.validate().unwrap_err().to_string();
+        assert!(error.contains("cycle"));
     }
 }
 

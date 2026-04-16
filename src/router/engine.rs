@@ -1,5 +1,5 @@
 use super::{FallbackChain, ProviderRegistry};
-use crate::analyzer::{match_scenario, FastAnalyzer, ModelCandidate, ScenarioMeta};
+use crate::analyzer::{match_scenario_by_model_scores, FastAnalyzer, ModelCandidate, ScenarioMeta};
 use crate::config::Config;
 use crate::models::{ChatRequest, ChatResponse};
 use crate::Result;
@@ -89,6 +89,29 @@ impl RoutingEngine {
                     );
                 }
             }
+
+            // Bare model name inference: if exactly one configured provider
+            // advertises this model name, route there directly and skip the
+            // analyzer.  This is intentional — the caller explicitly chose a
+            // model, so cost/scenario analysis would only add noise.
+            // If the name is ambiguous (multiple providers match), this returns
+            // None and we fall through to the analyzer below.
+            if let Some(provider_name) = self.resolve_provider_for_model(&request.model, &config) {
+                if let Some(provider) = self.registry.get(&provider_name) {
+                    tracing::info!(
+                        provider = provider_name,
+                        model = request.model,
+                        "Direct routing via inferred provider for model"
+                    );
+                    return timeout(timeout_duration, provider.send_request(request))
+                        .await
+                        .map_err(|_| {
+                            crate::error::YoloRouterError::RequestError(
+                                "Request timeout".to_string(),
+                            )
+                        })?;
+                }
+            }
         }
 
         // Auto-routing via analyzer
@@ -107,7 +130,7 @@ impl RoutingEngine {
                 })
                 .collect();
 
-            let (analysis, _scores) = self
+            let (analysis, scores) = self
                 .analyzer
                 .analyze_and_score(&request.messages, &candidates);
 
@@ -124,6 +147,19 @@ impl RoutingEngine {
                 })
                 .collect();
 
+            let scenario_model_ids: HashMap<String, Vec<String>> = scenarios
+                .iter()
+                .map(|(name, sc)| {
+                    (
+                        name.clone(),
+                        sc.models
+                            .iter()
+                            .map(|m| format!("{}/{}", m.provider, m.model))
+                            .collect(),
+                    )
+                })
+                .collect();
+
             tracing::debug!(
                 task_type = analysis.features.task_type.as_str(),
                 language = analysis.features.language.as_str(),
@@ -131,9 +167,11 @@ impl RoutingEngine {
                 "Analyzer result for auto-routing"
             );
 
-            if let Some(scenario_name) = match_scenario(
+            if let Some(scenario_name) = match_scenario_by_model_scores(
                 &analysis,
                 &scenario_data,
+                &scenario_model_ids,
+                &scores,
                 routing_config.confidence_threshold,
             ) {
                 return self
@@ -142,17 +180,11 @@ impl RoutingEngine {
             }
         }
 
-        // Last resort: first available provider
-        if let Some(provider) = self.registry.first() {
-            return timeout(timeout_duration, provider.send_request(request))
-                .await
-                .map_err(|_| {
-                    crate::error::YoloRouterError::RequestError("Request timeout".to_string())
-                })?;
-        }
-
         Err(crate::error::YoloRouterError::RoutingError(
-            "No provider available for request".to_string(),
+            format!(
+                "No routing decision for model '{}'. Configure scenarios/defaults or use provider:model",
+                request.model
+            ),
         ))
     }
 
@@ -169,7 +201,8 @@ impl RoutingEngine {
         // Explicit scenario wins immediately
         if let Some(scenario_name) = scenario {
             if let Ok(scenario_config) = config.get_scenario(scenario_name) {
-                if let Some(model_config) = scenario_config.models.first() {
+                let fallback = FallbackChain::new(scenario_config);
+                if let Some(model_config) = fallback.preferred_model() {
                     return Ok((model_config.provider.clone(), model_config.model.clone()));
                 }
             }
@@ -183,6 +216,10 @@ impl RoutingEngine {
                 if self.registry.get(provider_name).is_some() {
                     return Ok((provider_name.to_string(), model_parts[1].to_string()));
                 }
+            }
+
+            if let Some(provider_name) = self.resolve_provider_for_model(&request.model, &config) {
+                return Ok((provider_name, request.model.clone()));
             }
         }
 
@@ -202,7 +239,7 @@ impl RoutingEngine {
                 })
                 .collect();
 
-            let (analysis, _scores) = self
+            let (analysis, scores) = self
                 .analyzer
                 .analyze_and_score(&request.messages, &candidates);
 
@@ -219,27 +256,40 @@ impl RoutingEngine {
                 })
                 .collect();
 
-            if let Some(scenario_name) = match_scenario(
+            let scenario_model_ids: HashMap<String, Vec<String>> = scenarios
+                .iter()
+                .map(|(name, sc)| {
+                    (
+                        name.clone(),
+                        sc.models
+                            .iter()
+                            .map(|m| format!("{}/{}", m.provider, m.model))
+                            .collect(),
+                    )
+                })
+                .collect();
+
+            if let Some(scenario_name) = match_scenario_by_model_scores(
                 &analysis,
                 &scenario_data,
+                &scenario_model_ids,
+                &scores,
                 routing_config.confidence_threshold,
             ) {
                 if let Ok(scenario_config) = config.get_scenario(&scenario_name) {
-                    if let Some(model_config) = scenario_config.models.first() {
+                    let fallback = FallbackChain::new(scenario_config);
+                    if let Some(model_config) = fallback.preferred_model() {
                         return Ok((model_config.provider.clone(), model_config.model.clone()));
                     }
                 }
             }
         }
 
-        // Last resort: first available provider with a default model
-        if let Some((name, _)) = self.registry.list().first().map(|n| (n.clone(), ())) {
-            // Return the provider name and "auto" - let the provider decide
-            return Ok((name.clone(), "auto".to_string()));
-        }
-
         Err(crate::error::YoloRouterError::RoutingError(
-            "No provider available for model selection".to_string(),
+            format!(
+                "No routing decision for model '{}'. Configure scenarios/defaults or use provider:model",
+                request.model
+            ),
         ))
     }
 
@@ -253,13 +303,13 @@ impl RoutingEngine {
     ) -> Result<ChatResponse> {
         let routing_config = config.routing();
         if let Ok(scenario_config) = config.get_scenario(scenario_name) {
+            let fallback = FallbackChain::new(scenario_config);
             if routing_config.fallback_enabled {
                 let cooldown = if routing_config.cooldown_enabled {
                     Duration::from_secs(routing_config.cooldown_secs)
                 } else {
                     Duration::ZERO
                 };
-                let fallback = FallbackChain::new(scenario_config);
                 return timeout(
                     timeout_duration,
                     fallback.execute(
@@ -274,7 +324,7 @@ impl RoutingEngine {
                 .map_err(|_| {
                     crate::error::YoloRouterError::RequestError("Request timeout".to_string())
                 })?;
-            } else if let Some(model_config) = scenario_config.models.first() {
+            } else if let Some(model_config) = fallback.preferred_model() {
                 if let Some(provider) = self.registry.get(&model_config.provider) {
                     let mut req = request.clone();
                     req.model = model_config.model.clone();
@@ -300,5 +350,120 @@ impl RoutingEngine {
 
     pub fn registry(&self) -> &ProviderRegistry {
         &self.registry
+    }
+
+    fn resolve_provider_for_model(&self, model: &str, config: &Config) -> Option<String> {
+        let mut matches = self.registry.list().into_iter().filter(|provider_name| {
+            self.registry
+                .get(provider_name)
+                .map(|provider| provider.model_list().iter().any(|known| known == model))
+                .unwrap_or(false)
+        });
+
+        if let Some(first) = matches.next() {
+            return if matches.next().is_some() {
+                None
+            } else {
+                Some(first)
+            };
+        }
+
+        let mut configured_matches = config
+            .scenarios()
+            .values()
+            .flat_map(|scenario| scenario.models.iter())
+            .filter(|model_config| model_config.model == model)
+            .map(|model_config| model_config.provider.clone());
+
+        let first = configured_matches.next()?;
+        if configured_matches.any(|provider| provider != first) {
+            None
+        } else {
+            Some(first)
+        }
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    fn config_with_tiered_scenario() -> Config {
+        Config::from_string(
+            r#"
+[providers.openai]
+type = "openai"
+api_key = "test-key"
+
+[providers.anthropic]
+type = "anthropic"
+api_key = "test-key"
+
+[scenarios.coding]
+default_tier = "low"
+match_task_types = ["coding"]
+models = [
+    { provider = "openai", model = "gpt-4o", cost_tier = "high", fallback_to = "openai:gpt-4o-mini" },
+    { provider = "openai", model = "gpt-4o-mini", cost_tier = "low" },
+    { provider = "anthropic", model = "claude-sonnet-4.6", cost_tier = "medium" }
+]
+
+[routing]
+fallback_enabled = false
+"#,
+        )
+        .unwrap()
+    }
+
+    fn coding_request() -> ChatRequest {
+        ChatRequest {
+            model: "auto".to_string(),
+            messages: vec![crate::models::ChatMessage {
+                role: "user".to_string(),
+                content: "write code to implement a rust parser".to_string(),
+            }],
+            temperature: None,
+            max_tokens: None,
+            top_p: None,
+            stream: None,
+            system: None,
+            anthropic: None,
+        }
+    }
+
+    #[tokio::test]
+    async fn explicit_scenario_uses_preferred_tier_model() {
+        let engine = RoutingEngine::new_with_config(config_with_tiered_scenario()).unwrap();
+        let selected = engine
+            .select_best_model(&coding_request(), Some("coding"))
+            .await
+            .unwrap();
+
+        assert_eq!(selected, ("openai".to_string(), "gpt-4o-mini".to_string()));
+    }
+
+    #[tokio::test]
+    async fn explicit_model_resolves_provider_without_first_provider_fallback() {
+        let engine = RoutingEngine::new_with_config(config_with_tiered_scenario()).unwrap();
+        let mut request = coding_request();
+        request.model = "claude-sonnet-4.6".to_string();
+
+        let selected = engine.select_best_model(&request, None).await.unwrap();
+        assert_eq!(
+            selected,
+            ("anthropic".to_string(), "claude-sonnet-4.6".to_string())
+        );
+    }
+
+    #[tokio::test]
+    async fn explicit_unknown_model_returns_clear_error() {
+        let engine = RoutingEngine::new_with_config(config_with_tiered_scenario()).unwrap();
+        let mut request = coding_request();
+        request.model = "unknown-model".to_string();
+
+        let error = engine.select_best_model(&request, None).await.unwrap_err();
+        assert!(error
+            .to_string()
+            .contains("Configure scenarios/defaults or use provider:model"));
     }
 }

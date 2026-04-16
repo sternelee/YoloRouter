@@ -276,11 +276,7 @@ impl Provider for AnthropicProvider {
     }
 
     fn model_list(&self) -> Vec<String> {
-        vec![
-            "claude-opus".to_string(),
-            "claude-sonnet".to_string(),
-            "claude-haiku".to_string(),
-        ]
+        crate::provider::models::static_provider_models("anthropic").unwrap_or_default()
     }
 
     async fn start_streaming_request(&self, request: &ChatRequest) -> Result<Response> {
