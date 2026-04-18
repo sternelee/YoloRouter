@@ -49,6 +49,7 @@ retry_count = 2
             messages: vec![ChatMessage {
                 role: "user".to_string(),
                 content: "Hello!".to_string(),
+                ..Default::default()
             }],
             max_tokens: Some(1000),
             temperature: Some(0.7),

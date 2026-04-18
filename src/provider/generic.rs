@@ -74,6 +74,7 @@ impl Provider for GenericProvider {
                 message: ChatMessage {
                     role: "assistant".to_string(),
                     content,
+                    ..Default::default()
                 },
                 finish_reason: "stop".to_string(),
             }],

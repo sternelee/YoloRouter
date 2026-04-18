@@ -421,6 +421,7 @@ fallback_enabled = false
             messages: vec![crate::models::ChatMessage {
                 role: "user".to_string(),
                 content: "write code to implement a rust parser".to_string(),
+                ..Default::default()
             }],
             temperature: None,
             max_tokens: None,

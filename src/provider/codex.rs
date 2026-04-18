@@ -121,6 +121,7 @@ impl Provider for CodexProvider {
                 message: ChatMessage {
                     role: "assistant".to_string(),
                     content,
+                    ..Default::default()
                 },
                 finish_reason: data["choices"]
                     .get(0)

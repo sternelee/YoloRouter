@@ -457,23 +457,74 @@ impl CodexOAuthProvider {
     }
 }
 
+impl CodexOAuthProvider {
+    fn resolve_model(request: &ChatRequest) -> String {
+        if request.model.is_empty() || request.model == "auto" {
+            "gpt-4o".to_string()
+        } else {
+            request.model.clone()
+        }
+    }
+
+    fn is_reasoning_model(model: &str) -> bool {
+        model.starts_with("o1") || model.starts_with("o3") || model.starts_with("gpt-4.5")
+    }
+
+    fn build_payload(&self, request: &ChatRequest, stream: bool) -> Value {
+        let model = Self::resolve_model(request);
+        let is_reasoning = Self::is_reasoning_model(&model);
+
+        let mut payload = json!({
+            "model": model,
+            "messages": request.messages,
+        });
+
+        // Reasoning models (o1, o3, gpt-4.5+) don't support temperature/top_p
+        if !is_reasoning {
+            if let Some(temp) = request.temperature {
+                payload["temperature"] = json!(temp);
+            }
+            if let Some(top_p) = request.top_p {
+                payload["top_p"] = json!(top_p);
+            }
+        }
+
+        // max_tokens vs max_completion_tokens for reasoning models
+        if let Some(max_tokens) = request.max_tokens {
+            if is_reasoning {
+                payload["max_completion_tokens"] = json!(max_tokens);
+            } else {
+                payload["max_tokens"] = json!(max_tokens);
+            }
+        } else if is_reasoning {
+            payload["max_completion_tokens"] = json!(4096);
+        } else {
+            payload["max_tokens"] = json!(4096);
+        }
+
+        if let Some(tools) = request.tools.clone() {
+            payload["tools"] = tools;
+        }
+        if let Some(tool_choice) = request.tool_choice.clone() {
+            payload["tool_choice"] = tool_choice;
+        }
+        if let Some(stop_sequences) = request.stop_sequences.clone() {
+            payload["stop_sequences"] = json!(stop_sequences);
+        }
+        if stream {
+            payload["stream"] = json!(true);
+        }
+
+        payload
+    }
+}
+
 #[async_trait]
 impl Provider for CodexOAuthProvider {
     async fn send_request(&self, request: &ChatRequest) -> Result<ChatResponse> {
         let token = self.get_valid_token().await?;
-
-        let model = if request.model.is_empty() || request.model == "auto" {
-            "gpt-4o".to_string()
-        } else {
-            request.model.clone()
-        };
-
-        let payload = json!({
-            "model": model,
-            "messages": request.messages,
-            "temperature": request.temperature.unwrap_or(0.7),
-            "max_tokens": request.max_tokens.unwrap_or(4096),
-        });
+        let payload = self.build_payload(request, false);
+        let model = Self::resolve_model(request);
 
         let response = self
             .client
@@ -498,11 +549,18 @@ impl Provider for CodexOAuthProvider {
             .await
             .map_err(crate::error::YoloRouterError::HttpError)?;
 
-        let content = data["choices"]
-            .get(0)
-            .and_then(|c| c["message"]["content"].as_str())
-            .unwrap_or("No response")
+        let choice = data["choices"].get(0);
+        let message_obj = choice.and_then(|c| c.get("message")).unwrap_or(&Value::Null);
+
+        let content = message_obj["content"]
+            .as_str()
+            .unwrap_or("")
             .to_string();
+        let tool_calls = message_obj.get("tool_calls").cloned();
+        let refusal = message_obj["refusal"].as_str().map(|s| s.to_string());
+        let reasoning_content = message_obj["reasoning_content"]
+            .as_str()
+            .map(|s| s.to_string());
 
         Ok(ChatResponse {
             id: data["id"].as_str().unwrap_or("").to_string(),
@@ -512,9 +570,11 @@ impl Provider for CodexOAuthProvider {
                 message: ChatMessage {
                     role: "assistant".to_string(),
                     content,
+                    tool_calls,
+                    refusal,
+                    reasoning_content,
                 },
-                finish_reason: data["choices"]
-                    .get(0)
+                finish_reason: choice
                     .and_then(|c| c["finish_reason"].as_str())
                     .unwrap_or("stop")
                     .to_string(),
@@ -531,20 +591,7 @@ impl Provider for CodexOAuthProvider {
 
     async fn start_streaming_request(&self, request: &ChatRequest) -> Result<reqwest::Response> {
         let token = self.get_valid_token().await?;
-
-        let model = if request.model.is_empty() || request.model == "auto" {
-            "gpt-4o".to_string()
-        } else {
-            request.model.clone()
-        };
-
-        let payload = json!({
-            "model": model,
-            "messages": request.messages,
-            "temperature": request.temperature.unwrap_or(0.7),
-            "max_tokens": request.max_tokens.unwrap_or(4096),
-            "stream": true
-        });
+        let payload = self.build_payload(request, true);
 
         let response = self
             .client
@@ -662,5 +709,104 @@ mod tests {
     fn test_parse_codex_usage_response_without_rate_limit() {
         let parsed: CodexUsageResponse = serde_json::from_value(json!({})).unwrap();
         assert!(parsed.rate_limit.is_none());
+    }
+
+    #[test]
+    fn test_is_reasoning_model() {
+        assert!(CodexOAuthProvider::is_reasoning_model("o1-mini"));
+        assert!(CodexOAuthProvider::is_reasoning_model("o1-preview"));
+        assert!(CodexOAuthProvider::is_reasoning_model("o3-mini"));
+        assert!(CodexOAuthProvider::is_reasoning_model("gpt-4.5-preview"));
+        assert!(!CodexOAuthProvider::is_reasoning_model("gpt-4o"));
+        assert!(!CodexOAuthProvider::is_reasoning_model("gpt-4o-mini"));
+    }
+
+    #[test]
+    fn test_build_payload_passthrough_fields() {
+        let provider = CodexOAuthProvider::new(None);
+        let request = ChatRequest {
+            model: "gpt-4o".to_string(),
+            messages: vec![ChatMessage {
+                role: "user".to_string(),
+                content: "hi".to_string(),
+                ..Default::default()
+            }],
+            temperature: Some(0.5),
+            max_tokens: Some(1024),
+            top_p: Some(0.9),
+            stream: Some(true),
+            system: None,
+            anthropic: None,
+            tools: Some(json!([{"name": "Read"}])),
+            tool_choice: Some(json!({"type": "auto"})),
+            stop_sequences: Some(vec!["STOP".to_string()]),
+        };
+
+        let payload = provider.build_payload(&request, false);
+        assert_eq!(payload["model"], "gpt-4o");
+        assert_eq!(payload["temperature"], 0.5);
+        assert_eq!(payload["max_tokens"], 1024);
+        assert!((payload["top_p"].as_f64().unwrap() - 0.9).abs() < 0.001);
+        assert_eq!(payload["tools"][0]["name"], "Read");
+        assert_eq!(payload["tool_choice"]["type"], "auto");
+        assert_eq!(payload["stop_sequences"][0], "STOP");
+        assert!(payload.get("stream").is_none());
+
+        let stream_payload = provider.build_payload(&request, true);
+        assert_eq!(stream_payload["stream"], true);
+    }
+
+    #[test]
+    fn test_build_payload_reasoning_model_uses_max_completion_tokens() {
+        let provider = CodexOAuthProvider::new(None);
+        let request = ChatRequest {
+            model: "o3-mini".to_string(),
+            messages: vec![ChatMessage {
+                role: "user".to_string(),
+                content: "think".to_string(),
+                ..Default::default()
+            }],
+            temperature: Some(0.7),
+            max_tokens: Some(2048),
+            top_p: Some(0.9),
+            stream: None,
+            system: None,
+            anthropic: None,
+            tools: None,
+            tool_choice: None,
+            stop_sequences: None,
+        };
+
+        let payload = provider.build_payload(&request, false);
+        assert_eq!(payload["model"], "o3-mini");
+        assert_eq!(payload["max_completion_tokens"], 2048);
+        assert!(payload.get("max_tokens").is_none());
+        assert!(payload.get("temperature").is_none());
+        assert!(payload.get("top_p").is_none());
+    }
+
+    #[test]
+    fn test_build_payload_default_max_tokens() {
+        let provider = CodexOAuthProvider::new(None);
+        let request = ChatRequest {
+            model: "gpt-4o".to_string(),
+            messages: vec![ChatMessage {
+                role: "user".to_string(),
+                content: "hi".to_string(),
+                ..Default::default()
+            }],
+            temperature: None,
+            max_tokens: None,
+            top_p: None,
+            stream: None,
+            system: None,
+            anthropic: None,
+            tools: None,
+            tool_choice: None,
+            stop_sequences: None,
+        };
+
+        let payload = provider.build_payload(&request, false);
+        assert_eq!(payload["max_tokens"], 4096);
     }
 }

@@ -286,6 +286,7 @@ impl Provider for AnthropicProvider {
                 message: ChatMessage {
                     role: "assistant".to_string(),
                     content,
+                    ..Default::default()
                 },
                 finish_reason: stop_reason,
             }],
@@ -331,6 +332,7 @@ mod tests {
             messages: vec![ChatMessage {
                 role: "user".to_string(),
                 content: "flattened".to_string(),
+                ..Default::default()
             }],
             temperature: Some(0.4),
             max_tokens: Some(512),
@@ -435,6 +437,7 @@ mod tests {
             messages: vec![ChatMessage {
                 role: "user".to_string(),
                 content: "hello".to_string(),
+                ..Default::default()
             }],
             temperature: None,
             max_tokens: None,
@@ -462,6 +465,7 @@ mod tests {
             messages: vec![ChatMessage {
                 role: "user".to_string(),
                 content: "hello".to_string(),
+                ..Default::default()
             }],
             temperature: Some(0.5),
             max_tokens: Some(1024),
@@ -497,14 +501,17 @@ mod tests {
                 ChatMessage {
                     role: "system".to_string(),
                     content: "You are helpful.".to_string(),
+                    ..Default::default()
                 },
                 ChatMessage {
                     role: "system".to_string(),
                     content: "Be concise.".to_string(),
+                    ..Default::default()
                 },
                 ChatMessage {
                     role: "user".to_string(),
                     content: "hello".to_string(),
+                    ..Default::default()
                 },
             ],
             temperature: None,

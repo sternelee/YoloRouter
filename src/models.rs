@@ -1,10 +1,16 @@
 use serde::{Deserialize, Serialize};
 use serde_json::{Map, Value};
 
-#[derive(Debug, Clone, Serialize, Deserialize)]
+#[derive(Debug, Clone, Default, Serialize, Deserialize)]
 pub struct ChatMessage {
     pub role: String, // "user", "assistant", "system"
     pub content: String,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub tool_calls: Option<Value>,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub refusal: Option<String>,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub reasoning_content: Option<String>,
 }
 
 #[derive(Debug, Clone, Serialize, Deserialize)]
@@ -286,6 +292,7 @@ impl From<AnthropicRequest> for ChatRequest {
             .map(|m| ChatMessage {
                 role: m.role.clone(),
                 content: m.content.to_routing_text(),
+                ..Default::default()
             })
             .collect();
         ChatRequest {
@@ -476,6 +483,7 @@ mod tests {
                 message: ChatMessage {
                     role: "assistant".to_string(),
                     content: "ignored text".to_string(),
+                    ..Default::default()
                 },
                 finish_reason: "tool_calls".to_string(),
             }],

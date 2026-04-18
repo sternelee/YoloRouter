@@ -839,6 +839,7 @@ base_url = "http://127.0.0.1:9"
                 message: crate::models::ChatMessage {
                     role: "assistant".to_string(),
                     content: "hello".to_string(),
+                    ..Default::default()
                 },
                 finish_reason: "stop".to_string(),
             }],

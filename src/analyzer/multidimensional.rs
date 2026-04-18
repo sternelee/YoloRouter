@@ -1032,6 +1032,7 @@ mod tests {
         ChatMessage {
             role: "user".to_string(),
             content: content.to_string(),
+            ..Default::default()
         }
     }
 
