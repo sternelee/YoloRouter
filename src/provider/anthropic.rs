@@ -69,7 +69,7 @@ impl AnthropicProvider {
         }
     }
 
-    fn build_payload(&self, request: &ChatRequest) -> Value {
+    fn build_payload(&self, request: &ChatRequest, stream: bool) -> Value {
         if let Some(native) = &request.anthropic {
             let mut native = native.clone();
             native.betas = None;
@@ -83,6 +83,7 @@ impl AnthropicProvider {
                 "max_tokens": native.max_tokens.or(request.max_tokens).unwrap_or(2048),
                 "temperature": native.temperature.or(request.temperature),
                 "top_p": native.top_p.or(request.top_p),
+                "stream": stream,
             });
 
             if let Some(system) = native.system.clone().or_else(|| request.system.clone()) {
@@ -112,20 +113,30 @@ impl AnthropicProvider {
                     map.remove("top_p");
                 }
                 for (key, value) in &native.extra {
-                    map.entry(key.clone()).or_insert_with(|| value.clone());
+                    map.insert(key.clone(), value.clone());
                 }
             }
 
             return payload;
         }
 
-        let system: Option<serde_json::Value> = request.system.clone().or_else(|| {
-            request
-                .messages
-                .iter()
-                .find(|m| m.role == "system")
-                .map(|m| serde_json::Value::String(m.content.clone()))
-        });
+        // Collect all system messages, not just the first
+        let system_parts: Vec<_> = request
+            .messages
+            .iter()
+            .filter(|m| m.role == "system")
+            .map(|m| json!({"type": "text", "text": m.content}))
+            .collect();
+
+        let system: Option<serde_json::Value> = if !system_parts.is_empty() {
+            if system_parts.len() == 1 {
+                Some(system_parts.into_iter().next().unwrap())
+            } else {
+                Some(json!(system_parts))
+            }
+        } else {
+            request.system.clone()
+        };
 
         let messages: Vec<_> = request
             .messages
@@ -138,23 +149,36 @@ impl AnthropicProvider {
             "max_tokens": request.max_tokens.unwrap_or(2048),
             "messages": messages,
             "temperature": request.temperature.unwrap_or(0.7),
+            "stream": stream,
         });
 
         if let Some(sys) = system {
             payload["system"] = sys;
         }
+        if let Some(top_p) = request.top_p {
+            payload["top_p"] = json!(top_p);
+        }
+        if let Some(tools) = request.tools.clone() {
+            payload["tools"] = tools;
+        }
+        if let Some(tool_choice) = request.tool_choice.clone() {
+            payload["tool_choice"] = tool_choice;
+        }
+        if let Some(stop_sequences) = request.stop_sequences.clone() {
+            payload["stop_sequences"] = json!(stop_sequences);
+        }
 
         payload
     }
 
-    fn request_builder(&self, request: &ChatRequest) -> reqwest::RequestBuilder {
+    fn request_builder(&self, request: &ChatRequest, stream: bool) -> reqwest::RequestBuilder {
         let url = format!("{}/v1/messages", self.base_url);
-        let payload = self.build_payload(request);
+        let payload = self.build_payload(request, stream);
         let mut builder = self
             .client
             .post(&url)
             .header("x-api-key", &self.api_key)
-            .header("anthropic-version", "2023-06-01");
+            .header("anthropic-version", "2024-10-22");
 
         if let Some(native) = &request.anthropic {
             if let Some(beta_header) = Self::beta_header_value(native) {
@@ -167,7 +191,7 @@ impl AnthropicProvider {
 
     pub async fn start_streaming_request(&self, request: &ChatRequest) -> Result<Response> {
         let response = self
-            .request_builder(request)
+            .request_builder(request, true)
             .header("accept", "text/event-stream")
             .send()
             .await
@@ -206,7 +230,9 @@ impl AnthropicProvider {
             .collect::<Vec<_>>()
             .join("");
 
-        if text.is_empty() {
+        if text.is_empty() && blocks.iter().any(|b| b.is_tool_related()) {
+            "".to_string()
+        } else if text.is_empty() {
             "No response".to_string()
         } else {
             text
@@ -218,16 +244,20 @@ impl AnthropicProvider {
 impl Provider for AnthropicProvider {
     async fn send_request(&self, request: &ChatRequest) -> Result<ChatResponse> {
         let response = self
-            .request_builder(request)
+            .request_builder(request, false)
             .send()
             .await
             .map_err(crate::error::YoloRouterError::HttpError)?;
 
         if !response.status().is_success() {
-            return Err(crate::error::YoloRouterError::RequestError(format!(
-                "Anthropic API error: {}",
-                response.status()
-            )));
+            let status = response.status();
+            let body = response.text().await.unwrap_or_default();
+            let message = if body.is_empty() {
+                format!("Anthropic API error: {}", status)
+            } else {
+                format!("Anthropic API error: {} - {}", status, body)
+            };
+            return Err(crate::error::YoloRouterError::RequestError(message));
         }
 
         let data: Value = response
@@ -292,7 +322,7 @@ impl Provider for AnthropicProvider {
 mod tests {
     use super::*;
     use crate::models::{AnthropicBetas, AnthropicContent, AnthropicMessage};
-    use serde_json::json;
+    use serde_json::{json, Map};
 
     #[test]
     fn build_payload_prefers_native_anthropic_request() {
@@ -328,10 +358,13 @@ mod tests {
                 ])),
                 extra: serde_json::from_value(json!({"container": {"id": "session-1"}})).unwrap(),
             }),
+            tools: None,
+            tool_choice: None,
+            stop_sequences: None,
         };
 
         let provider = AnthropicProvider::new("test-key".to_string());
-        let payload = provider.build_payload(&request);
+        let payload = provider.build_payload(&request, false);
 
         assert_eq!(payload["model"], json!("claude-sonnet-4-5"));
         assert_eq!(payload["messages"][0]["content"][0]["text"], json!("hello"));
@@ -393,5 +426,129 @@ mod tests {
         assert_eq!(blocks.len(), 2);
         assert_eq!(blocks[1].block_type, "tool_use");
         assert_eq!(blocks[1].name.as_deref(), Some("Read"));
+    }
+
+    #[test]
+    fn build_payload_injects_stream_flag() {
+        let request = ChatRequest {
+            model: "claude-sonnet-4-5".to_string(),
+            messages: vec![ChatMessage {
+                role: "user".to_string(),
+                content: "hello".to_string(),
+            }],
+            temperature: None,
+            max_tokens: None,
+            top_p: None,
+            stream: Some(true),
+            system: None,
+            anthropic: None,
+            tools: None,
+            tool_choice: None,
+            stop_sequences: None,
+        };
+
+        let provider = AnthropicProvider::new("test-key".to_string());
+        let payload_stream = provider.build_payload(&request, true);
+        let payload_no_stream = provider.build_payload(&request, false);
+
+        assert_eq!(payload_stream["stream"], json!(true));
+        assert_eq!(payload_no_stream["stream"], json!(false));
+    }
+
+    #[test]
+    fn build_payload_fallback_preserves_tools_and_stop_sequences() {
+        let request = ChatRequest {
+            model: "claude-sonnet-4-5".to_string(),
+            messages: vec![ChatMessage {
+                role: "user".to_string(),
+                content: "hello".to_string(),
+            }],
+            temperature: Some(0.5),
+            max_tokens: Some(1024),
+            top_p: Some(0.9),
+            stream: Some(true),
+            system: None,
+            anthropic: None,
+            tools: Some(json!([{"name": "Read"}])),
+            tool_choice: Some(json!({"type": "auto"})),
+            stop_sequences: Some(vec!["STOP".to_string(), "HALT".to_string()]),
+        };
+
+        let provider = AnthropicProvider::new("test-key".to_string());
+        let payload = provider.build_payload(&request, true);
+
+        assert_eq!(payload["model"], json!("claude-sonnet-4-5"));
+        assert_eq!(payload["temperature"], json!(0.5));
+        assert!(
+            (payload["top_p"].as_f64().unwrap() - 0.9).abs() < 0.001,
+            "top_p should be approximately 0.9"
+        );
+        assert_eq!(payload["stream"], json!(true));
+        assert_eq!(payload["tools"][0]["name"], json!("Read"));
+        assert_eq!(payload["tool_choice"]["type"], json!("auto"));
+        assert_eq!(payload["stop_sequences"], json!(["STOP", "HALT"]));
+    }
+
+    #[test]
+    fn build_payload_fallback_collects_all_system_messages() {
+        let request = ChatRequest {
+            model: "claude-sonnet-4-5".to_string(),
+            messages: vec![
+                ChatMessage {
+                    role: "system".to_string(),
+                    content: "You are helpful.".to_string(),
+                },
+                ChatMessage {
+                    role: "system".to_string(),
+                    content: "Be concise.".to_string(),
+                },
+                ChatMessage {
+                    role: "user".to_string(),
+                    content: "hello".to_string(),
+                },
+            ],
+            temperature: None,
+            max_tokens: None,
+            top_p: None,
+            stream: None,
+            system: None,
+            anthropic: None,
+            tools: None,
+            tool_choice: None,
+            stop_sequences: None,
+        };
+
+        let provider = AnthropicProvider::new("test-key".to_string());
+        let payload = provider.build_payload(&request, false);
+
+        // Both system messages should be collected
+        let system = payload["system"].as_array().unwrap();
+        assert_eq!(system.len(), 2);
+        assert_eq!(system[0]["text"], json!("You are helpful."));
+        assert_eq!(system[1]["text"], json!("Be concise."));
+
+        // No system messages in messages array
+        let messages = payload["messages"].as_array().unwrap();
+        assert_eq!(messages.len(), 1);
+        assert_eq!(messages[0]["role"], json!("user"));
+    }
+
+    #[test]
+    fn extract_text_content_returns_empty_for_tool_only() {
+        let blocks = vec![
+            AnthropicContentBlock {
+                block_type: "tool_use".to_string(),
+                text: None,
+                id: Some("toolu_1".to_string()),
+                name: Some("Read".to_string()),
+                input: Some(json!({"file_path": "/tmp/x"})),
+                tool_use_id: None,
+                content: None,
+                extra: Map::new(),
+            },
+        ];
+
+        let text = AnthropicProvider::extract_text_content(&blocks);
+        assert_eq!(text, "");
     }
 }

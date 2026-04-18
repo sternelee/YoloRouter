@@ -428,6 +428,9 @@ fallback_enabled = false
             stream: None,
             system: None,
             anthropic: None,
+            tools: None,
+            tool_choice: None,
+            stop_sequences: None,
         }
     }
 

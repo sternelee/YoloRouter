@@ -56,6 +56,9 @@ retry_count = 2
             stream: None,
             system: None,
             anthropic: None,
+            tools: None,
+            tool_choice: None,
+            stop_sequences: None,
         };
 
         assert_eq!(request.model, "claude-opus");

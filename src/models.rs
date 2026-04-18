@@ -24,6 +24,12 @@ pub struct ChatRequest {
     pub system: Option<Value>,
     #[serde(default, skip_serializing, skip_deserializing)]
     pub anthropic: Option<AnthropicRequest>,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub tools: Option<Value>,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub tool_choice: Option<Value>,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub stop_sequences: Option<Vec<String>>,
 }
 
 impl ChatRequest {
@@ -290,7 +296,10 @@ impl From<AnthropicRequest> for ChatRequest {
             top_p: req.top_p,
             stream: req.stream,
             system: req.system.clone(),
-            anthropic: Some(req),
+            anthropic: Some(req.clone()),
+            tools: req.tools.clone(),
+            tool_choice: req.tool_choice.clone(),
+            stop_sequences: req.stop_sequences.clone(),
         }
     }
 }
