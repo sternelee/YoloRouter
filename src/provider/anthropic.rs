@@ -542,18 +542,16 @@ mod tests {
 
     #[test]
     fn extract_text_content_returns_empty_for_tool_only() {
-        let blocks = vec![
-            AnthropicContentBlock {
-                block_type: "tool_use".to_string(),
-                text: None,
-                id: Some("toolu_1".to_string()),
-                name: Some("Read".to_string()),
-                input: Some(json!({"file_path": "/tmp/x"})),
-                tool_use_id: None,
-                content: None,
-                extra: Map::new(),
-            },
-        ];
+        let blocks = vec![AnthropicContentBlock {
+            block_type: "tool_use".to_string(),
+            text: None,
+            id: Some("toolu_1".to_string()),
+            name: Some("Read".to_string()),
+            input: Some(json!({"file_path": "/tmp/x"})),
+            tool_use_id: None,
+            content: None,
+            extra: Map::new(),
+        }];
 
         let text = AnthropicProvider::extract_text_content(&blocks);
         assert_eq!(text, "");

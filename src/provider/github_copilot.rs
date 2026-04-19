@@ -347,12 +347,11 @@ impl Provider for GitHubCopilotProvider {
             .map_err(crate::error::YoloRouterError::HttpError)?;
 
         let choice = data["choices"].get(0);
-        let message_obj = choice.and_then(|c| c.get("message")).unwrap_or(&Value::Null);
+        let message_obj = choice
+            .and_then(|c| c.get("message"))
+            .unwrap_or(&Value::Null);
 
-        let content = message_obj["content"]
-            .as_str()
-            .unwrap_or("")
-            .to_string();
+        let content = message_obj["content"].as_str().unwrap_or("").to_string();
         let tool_calls = message_obj.get("tool_calls").cloned();
         let refusal = message_obj["refusal"].as_str().map(|s| s.to_string());
         let reasoning_content = message_obj["reasoning_content"]
@@ -443,10 +442,14 @@ mod tests {
         assert!(GitHubCopilotProvider::is_reasoning_model("gpt-5.4"));
         assert!(GitHubCopilotProvider::is_reasoning_model("gpt-5-mini"));
         assert!(GitHubCopilotProvider::is_reasoning_model("codex-latest"));
-        assert!(GitHubCopilotProvider::is_reasoning_model("computer-use-preview"));
+        assert!(GitHubCopilotProvider::is_reasoning_model(
+            "computer-use-preview"
+        ));
         assert!(!GitHubCopilotProvider::is_reasoning_model("gpt-4o"));
         assert!(!GitHubCopilotProvider::is_reasoning_model("gpt-4.1"));
-        assert!(!GitHubCopilotProvider::is_reasoning_model("claude-sonnet-4.6"));
+        assert!(!GitHubCopilotProvider::is_reasoning_model(
+            "claude-sonnet-4.6"
+        ));
     }
 
     #[test]

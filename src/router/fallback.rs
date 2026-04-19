@@ -122,10 +122,13 @@ impl FallbackChain {
         // we must NOT insert a short-form key — doing so would silently route
         // `fallback_to = "gpt-4o"` to whichever entry was processed last.
         let model_name_counts: HashMap<&str, usize> =
-            self.scenario.models.iter().fold(HashMap::new(), |mut acc, m| {
-                *acc.entry(m.model.as_str()).or_insert(0) += 1;
-                acc
-            });
+            self.scenario
+                .models
+                .iter()
+                .fold(HashMap::new(), |mut acc, m| {
+                    *acc.entry(m.model.as_str()).or_insert(0) += 1;
+                    acc
+                });
 
         let model_by_ref: HashMap<String, usize> = self
             .scenario

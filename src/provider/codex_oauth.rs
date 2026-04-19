@@ -550,12 +550,11 @@ impl Provider for CodexOAuthProvider {
             .map_err(crate::error::YoloRouterError::HttpError)?;
 
         let choice = data["choices"].get(0);
-        let message_obj = choice.and_then(|c| c.get("message")).unwrap_or(&Value::Null);
+        let message_obj = choice
+            .and_then(|c| c.get("message"))
+            .unwrap_or(&Value::Null);
 
-        let content = message_obj["content"]
-            .as_str()
-            .unwrap_or("")
-            .to_string();
+        let content = message_obj["content"].as_str().unwrap_or("").to_string();
         let tool_calls = message_obj.get("tool_calls").cloned();
         let refusal = message_obj["refusal"].as_str().map(|s| s.to_string());
         let reasoning_content = message_obj["reasoning_content"]
