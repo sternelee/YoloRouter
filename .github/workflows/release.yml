@@ -8,6 +8,8 @@ on:
 permissions:
   contents: write
   packages: write
+  pages: write
+  id-token: write
 
 env:
   CARGO_TERM_COLOR: always
@@ -26,19 +28,19 @@ jobs:
         uses: dtolnay/rust-toolchain@stable
 
       - name: Cache cargo registry
-        uses: actions/cache@v3
+        uses: actions/cache@v4
         with:
           path: ~/.cargo/registry
           key: ${{ runner.os }}-cargo-registry-${{ hashFiles('**/Cargo.lock') }}
 
       - name: Cache cargo index
-        uses: actions/cache@v3
+        uses: actions/cache@v4
         with:
           path: ~/.cargo/git
           key: ${{ runner.os }}-cargo-git-${{ hashFiles('**/Cargo.lock') }}
 
       - name: Cache cargo build
-        uses: actions/cache@v3
+        uses: actions/cache@v4
         with:
           path: target
           key: ${{ runner.os }}-cargo-build-target-${{ hashFiles('**/Cargo.lock') }}
@@ -103,19 +105,19 @@ jobs:
         run: cargo install cross
 
       - name: Cache cargo registry
-        uses: actions/cache@v3
+        uses: actions/cache@v4
         with:
           path: ~/.cargo/registry
           key: ${{ runner.os }}-cargo-registry-${{ hashFiles('**/Cargo.lock') }}
 
       - name: Cache cargo index
-        uses: actions/cache@v3
+        uses: actions/cache@v4
         with:
           path: ~/.cargo/git
           key: ${{ runner.os }}-cargo-git-${{ hashFiles('**/Cargo.lock') }}
 
       - name: Cache cargo build
-        uses: actions/cache@v3
+        uses: actions/cache@v4
         with:
           path: target
           key: ${{ runner.os }}-cargo-build-target-${{ hashFiles('**/Cargo.lock') }}
@@ -152,7 +154,8 @@ jobs:
           # Create checksum
           cd release_artifacts
           if [ "${{ runner.os }}" = "Windows" ]; then
-            certutil -hashfile "${{ matrix.asset_name }}.exe" SHA256 > "${{ matrix.asset_name }}.sha256"
+            WIN_BINARY="${{ matrix.asset_name }}.exe"
+            certutil -hashfile "$WIN_BINARY" SHA256 | grep -v "CertUtil" | grep -v "SHA256 hash" | tr -d '\r ' > "${WIN_BINARY}.sha256"
           else
             sha256sum "${{ matrix.asset_name }}" > "${{ matrix.asset_name }}.sha256"
           fi
@@ -276,7 +279,7 @@ jobs:
           echo "\`\`\`" >> release_notes.md
 
       - name: Create GitHub Release
-        uses: softprops/action-gh-release@v1
+        uses: softprops/action-gh-release@v2
         with:
           files: release_assets/*
           body_path: release_notes.md
@@ -295,7 +298,7 @@ jobs:
         uses: actions/checkout@v4
 
       - name: Setup Pages
-        uses: actions/configure-pages@v3
+        uses: actions/configure-pages@v5
 
       - name: Build documentation
         run: |
@@ -317,10 +320,10 @@ jobs:
           echo "- [Project Summary](PROJECT_SUMMARY.md)" >> docs_build/00-index.md
 
       - name: Upload artifact
-        uses: actions/upload-pages-artifact@v2
+        uses: actions/upload-pages-artifact@v3
         with:
           path: 'docs_build'
 
       - name: Deploy to GitHub Pages
         id: deployment
-        uses: actions/deploy-pages@v2
+        uses: actions/deploy-pages@v4
