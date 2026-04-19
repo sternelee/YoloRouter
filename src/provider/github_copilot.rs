@@ -232,35 +232,101 @@ impl GitHubCopilotProvider {
     }
 }
 
+impl GitHubCopilotProvider {
+    fn resolve_model(request: &ChatRequest) -> String {
+        if request.model.is_empty() || request.model == "auto" {
+            "gpt-4o".to_string()
+        } else {
+            request.model.clone()
+        }
+    }
+
+    /// Reasoning models (o1, o3, o4-mini, gpt-5, codex, computer-use) don't support temperature/top_p.
+    fn is_reasoning_model(model: &str) -> bool {
+        model.starts_with("o1")
+            || model.starts_with("o3")
+            || model.starts_with("o4")
+            || model.starts_with("gpt-5")
+            || model.starts_with("codex-")
+            || model.starts_with("computer-use")
+    }
+
+    /// Build the request payload. Mirrors opencode-dev's copilot chat logic.
+    fn build_payload(&self, request: &ChatRequest, stream: bool) -> Value {
+        let model = Self::resolve_model(request);
+        let is_reasoning = Self::is_reasoning_model(&model);
+
+        let mut payload = json!({
+            "model": model,
+            "messages": request.messages,
+        });
+
+        // Reasoning models don't support temperature/top_p
+        if !is_reasoning {
+            if let Some(temp) = request.temperature {
+                payload["temperature"] = json!(temp);
+            }
+            if let Some(top_p) = request.top_p {
+                payload["top_p"] = json!(top_p);
+            }
+        }
+
+        // max_completion_tokens: opencode-dev omits it for plain gpt models,
+        // but keeps it for o-series and others. We keep it for all non-gpt-4o
+        // and make it optional for gpt-4o to match Copilot CLI behavior.
+        if let Some(max_tokens) = request.max_tokens {
+            payload["max_completion_tokens"] = json!(max_tokens);
+        } else if is_reasoning {
+            // Reasoning models benefit from an explicit limit
+            payload["max_completion_tokens"] = json!(4096);
+        }
+        // For regular gpt models, omit max_completion_tokens when not set
+        // to let Copilot use its own defaults.
+
+        if let Some(tools) = request.tools.clone() {
+            payload["tools"] = tools;
+        }
+        if let Some(tool_choice) = request.tool_choice.clone() {
+            payload["tool_choice"] = tool_choice;
+        }
+        if let Some(stop_sequences) = request.stop_sequences.clone() {
+            payload["stop_sequences"] = json!(stop_sequences);
+        }
+        if stream {
+            payload["stream"] = json!(true);
+        } else {
+            payload["stream"] = json!(false);
+        }
+
+        payload
+    }
+
+    fn common_headers(&self, copilot_token: &str) -> Vec<(&str, String)> {
+        vec![
+            ("Authorization", format!("Bearer {}", copilot_token)),
+            ("Content-Type", "application/json".to_string()),
+            ("Copilot-Integration-Id", "vscode-chat".to_string()),
+            ("Editor-Version", COPILOT_EDITOR_VERSION.to_string()),
+            ("Editor-Plugin-Version", COPILOT_PLUGIN_VERSION.to_string()),
+            ("User-Agent", COPILOT_USER_AGENT.to_string()),
+            ("x-github-api-version", COPILOT_API_VERSION.to_string()),
+        ]
+    }
+}
+
 #[async_trait]
 impl Provider for GitHubCopilotProvider {
     async fn send_request(&self, request: &ChatRequest) -> Result<ChatResponse> {
         let copilot_token = self.get_copilot_token().await?;
+        let payload = self.build_payload(request, false);
+        let model = Self::resolve_model(request);
 
-        let model = if request.model.is_empty() || request.model == "auto" {
-            "gpt-4o".to_string()
-        } else {
-            request.model.clone()
-        };
+        let mut builder = self.client.post(COPILOT_CHAT_URL);
+        for (key, value) in self.common_headers(&copilot_token) {
+            builder = builder.header(key, value);
+        }
 
-        let payload = json!({
-            "model": model,
-            "messages": request.messages,
-            "temperature": request.temperature.unwrap_or(0.7),
-            "max_completion_tokens": request.max_tokens.unwrap_or(4096),
-            "stream": false
-        });
-
-        let response = self
-            .client
-            .post(COPILOT_CHAT_URL)
-            .header("Authorization", format!("Bearer {}", copilot_token))
-            .header("Content-Type", "application/json")
-            .header("Copilot-Integration-Id", "vscode-chat")
-            .header("Editor-Version", COPILOT_EDITOR_VERSION)
-            .header("Editor-Plugin-Version", COPILOT_PLUGIN_VERSION)
-            .header("User-Agent", COPILOT_USER_AGENT)
-            .header("x-github-api-version", COPILOT_API_VERSION)
+        let response = builder
             .json(&payload)
             .send()
             .await
@@ -280,24 +346,32 @@ impl Provider for GitHubCopilotProvider {
             .await
             .map_err(crate::error::YoloRouterError::HttpError)?;
 
-        let content = data["choices"]
-            .get(0)
-            .and_then(|c| c["message"]["content"].as_str())
-            .unwrap_or("No response")
+        let choice = data["choices"].get(0);
+        let message_obj = choice.and_then(|c| c.get("message")).unwrap_or(&Value::Null);
+
+        let content = message_obj["content"]
+            .as_str()
+            .unwrap_or("")
             .to_string();
+        let tool_calls = message_obj.get("tool_calls").cloned();
+        let refusal = message_obj["refusal"].as_str().map(|s| s.to_string());
+        let reasoning_content = message_obj["reasoning_content"]
+            .as_str()
+            .map(|s| s.to_string());
 
         Ok(ChatResponse {
             id: data["id"].as_str().unwrap_or("").to_string(),
-            model: data["model"].as_str().unwrap_or("gpt-4o").to_string(),
+            model: data["model"].as_str().unwrap_or(&model).to_string(),
             choices: vec![Choice {
                 index: 0,
                 message: ChatMessage {
                     role: "assistant".to_string(),
                     content,
-                    ..Default::default()
+                    tool_calls,
+                    refusal,
+                    reasoning_content,
                 },
-                finish_reason: data["choices"]
-                    .get(0)
+                finish_reason: choice
                     .and_then(|c| c["finish_reason"].as_str())
                     .unwrap_or("stop")
                     .to_string(),
@@ -314,32 +388,17 @@ impl Provider for GitHubCopilotProvider {
 
     async fn start_streaming_request(&self, request: &ChatRequest) -> Result<reqwest::Response> {
         let copilot_token = self.get_copilot_token().await?;
+        let payload = self.build_payload(request, true);
 
-        let model = if request.model.is_empty() || request.model == "auto" {
-            "gpt-4o".to_string()
-        } else {
-            request.model.clone()
-        };
-
-        let payload = json!({
-            "model": model,
-            "messages": request.messages,
-            "temperature": request.temperature.unwrap_or(0.7),
-            "max_completion_tokens": request.max_tokens.unwrap_or(4096),
-            "stream": true
-        });
-
-        let response = self
+        let mut builder = self
             .client
             .post(COPILOT_CHAT_URL)
-            .header("Authorization", format!("Bearer {}", copilot_token))
-            .header("Content-Type", "application/json")
-            .header("Accept", "text/event-stream")
-            .header("Copilot-Integration-Id", "vscode-chat")
-            .header("Editor-Version", COPILOT_EDITOR_VERSION)
-            .header("Editor-Plugin-Version", COPILOT_PLUGIN_VERSION)
-            .header("User-Agent", COPILOT_USER_AGENT)
-            .header("x-github-api-version", COPILOT_API_VERSION)
+            .header("Accept", "text/event-stream");
+        for (key, value) in self.common_headers(&copilot_token) {
+            builder = builder.header(key, value);
+        }
+
+        let response = builder
             .json(&payload)
             .send()
             .await
@@ -367,5 +426,143 @@ impl Provider for GitHubCopilotProvider {
 
     fn model_list(&self) -> Vec<String> {
         crate::provider::models::static_provider_models("github_copilot").unwrap_or_default()
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use serde_json::json;
+
+    #[test]
+    fn test_is_reasoning_model() {
+        assert!(GitHubCopilotProvider::is_reasoning_model("o1-mini"));
+        assert!(GitHubCopilotProvider::is_reasoning_model("o1-preview"));
+        assert!(GitHubCopilotProvider::is_reasoning_model("o3-mini"));
+        assert!(GitHubCopilotProvider::is_reasoning_model("o4-mini"));
+        assert!(GitHubCopilotProvider::is_reasoning_model("gpt-5.4"));
+        assert!(GitHubCopilotProvider::is_reasoning_model("gpt-5-mini"));
+        assert!(GitHubCopilotProvider::is_reasoning_model("codex-latest"));
+        assert!(GitHubCopilotProvider::is_reasoning_model("computer-use-preview"));
+        assert!(!GitHubCopilotProvider::is_reasoning_model("gpt-4o"));
+        assert!(!GitHubCopilotProvider::is_reasoning_model("gpt-4.1"));
+        assert!(!GitHubCopilotProvider::is_reasoning_model("claude-sonnet-4.6"));
+    }
+
+    #[test]
+    fn test_build_payload_passthrough_fields() {
+        let provider = GitHubCopilotProvider::new("test-token".to_string());
+        let request = ChatRequest {
+            model: "gpt-4o".to_string(),
+            messages: vec![ChatMessage {
+                role: "user".to_string(),
+                content: "hi".to_string(),
+                ..Default::default()
+            }],
+            temperature: Some(0.5),
+            max_tokens: Some(1024),
+            top_p: Some(0.9),
+            stream: Some(true),
+            system: None,
+            anthropic: None,
+            tools: Some(json!([{"name": "Read"}])),
+            tool_choice: Some(json!({"type": "auto"})),
+            stop_sequences: Some(vec!["STOP".to_string()]),
+        };
+
+        let payload = provider.build_payload(&request, false);
+        assert_eq!(payload["model"], "gpt-4o");
+        assert_eq!(payload["temperature"], 0.5);
+        assert_eq!(payload["max_completion_tokens"], 1024);
+        assert!((payload["top_p"].as_f64().unwrap() - 0.9).abs() < 0.001);
+        assert_eq!(payload["tools"][0]["name"], "Read");
+        assert_eq!(payload["tool_choice"]["type"], "auto");
+        assert_eq!(payload["stop_sequences"][0], "STOP");
+        assert_eq!(payload["stream"], false);
+
+        let stream_payload = provider.build_payload(&request, true);
+        assert_eq!(stream_payload["stream"], true);
+    }
+
+    #[test]
+    fn test_build_payload_reasoning_model_skips_temperature_top_p() {
+        let provider = GitHubCopilotProvider::new("test-token".to_string());
+        let request = ChatRequest {
+            model: "o3-mini".to_string(),
+            messages: vec![ChatMessage {
+                role: "user".to_string(),
+                content: "think".to_string(),
+                ..Default::default()
+            }],
+            temperature: Some(0.7),
+            max_tokens: Some(2048),
+            top_p: Some(0.9),
+            stream: None,
+            system: None,
+            anthropic: None,
+            tools: None,
+            tool_choice: None,
+            stop_sequences: None,
+        };
+
+        let payload = provider.build_payload(&request, false);
+        assert_eq!(payload["model"], "o3-mini");
+        assert_eq!(payload["max_completion_tokens"], 2048);
+        assert!(payload.get("temperature").is_none());
+        assert!(payload.get("top_p").is_none());
+    }
+
+    #[test]
+    fn test_build_payload_gpt_omits_max_tokens_when_unset() {
+        let provider = GitHubCopilotProvider::new("test-token".to_string());
+        let request = ChatRequest {
+            model: "gpt-4o".to_string(),
+            messages: vec![ChatMessage {
+                role: "user".to_string(),
+                content: "hi".to_string(),
+                ..Default::default()
+            }],
+            temperature: None,
+            max_tokens: None,
+            top_p: None,
+            stream: None,
+            system: None,
+            anthropic: None,
+            tools: None,
+            tool_choice: None,
+            stop_sequences: None,
+        };
+
+        let payload = provider.build_payload(&request, false);
+        // gpt-4o without explicit max_tokens should omit max_completion_tokens
+        assert!(payload.get("max_completion_tokens").is_none());
+        assert!(payload.get("temperature").is_none());
+        assert!(payload.get("top_p").is_none());
+    }
+
+    #[test]
+    fn test_build_payload_reasoning_defaults_max_tokens() {
+        let provider = GitHubCopilotProvider::new("test-token".to_string());
+        let request = ChatRequest {
+            model: "gpt-5.4".to_string(),
+            messages: vec![ChatMessage {
+                role: "user".to_string(),
+                content: "hi".to_string(),
+                ..Default::default()
+            }],
+            temperature: None,
+            max_tokens: None,
+            top_p: None,
+            stream: None,
+            system: None,
+            anthropic: None,
+            tools: None,
+            tool_choice: None,
+            stop_sequences: None,
+        };
+
+        let payload = provider.build_payload(&request, false);
+        // reasoning models get a default max_completion_tokens
+        assert_eq!(payload["max_completion_tokens"], 4096);
     }
 }
