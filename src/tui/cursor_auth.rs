@@ -1,33 +1,31 @@
-use std::path::PathBuf;
 use std::process::Stdio;
 
-/// Return possible paths to the Cursor CLI config file that holds the auth token.
-pub fn cursor_token_paths() -> Vec<PathBuf> {
-    let mut paths = Vec::new();
-    if let Some(home) = dirs::home_dir() {
-        paths.push(home.join(".cursor").join("cli-config.json"));
-    }
-    if let Some(config) = dirs::config_dir() {
-        paths.push(config.join("cursor").join("cli-config.json"));
-    }
-    paths
-}
+/// Run `cursor-agent status` to check whether the user is authenticated.
+///
+/// Returns `true` if stdout contains "Login successful" or "Logged in".
+pub async fn check_cursor_auth(agent_path: &str) -> Result<bool, String> {
+    let output = tokio::process::Command::new(agent_path)
+        .args(["status"])
+        .stdin(Stdio::null())
+        .stdout(Stdio::piped())
+        .stderr(Stdio::piped())
+        .output()
+        .await
+        .map_err(|e| {
+            format!(
+                "Failed to spawn '{} status': {}. Is cursor-agent installed?",
+                agent_path, e
+            )
+        })?;
 
-/// Check whether the user is already authenticated with Cursor.
-pub async fn check_cursor_auth() -> Result<bool, String> {
-    for path in cursor_token_paths() {
-        if path.exists() {
-            let content = tokio::fs::read_to_string(&path)
-                .await
-                .map_err(|e| format!("Failed to read {}: {}", path.display(), e))?;
-            let json: serde_json::Value = serde_json::from_str(&content)
-                .map_err(|e| format!("Failed to parse {}: {}", path.display(), e))?;
-            if json.get("token").or(json.get("accessToken")).is_some() {
-                return Ok(true);
-            }
-        }
-    }
-    Ok(false)
+    let stdout = String::from_utf8_lossy(&output.stdout);
+    let stderr = String::from_utf8_lossy(&output.stderr);
+    let combined = format!("{} {}", stdout, stderr);
+
+    let is_authed = combined.contains("Login successful")
+        || combined.contains("Logged in");
+
+    Ok(is_authed)
 }
 
 /// Run `cursor-agent login` interactively (inherits stdin/stdout/stderr).
@@ -68,7 +66,7 @@ pub async fn run_cursor_device_flow(agent_path: Option<String>) -> Result<bool, 
         std::env::var("CURSOR_AGENT_EXECUTABLE").unwrap_or_else(|_| "cursor-agent".to_string())
     });
 
-    if check_cursor_auth().await? {
+    if check_cursor_auth(&agent).await? {
         println!("Cursor is already authenticated.");
         return Ok(true);
     }
@@ -79,7 +77,7 @@ pub async fn run_cursor_device_flow(agent_path: Option<String>) -> Result<bool, 
 
     run_cursor_login(&agent).await?;
 
-    if check_cursor_auth().await? {
+    if check_cursor_auth(&agent).await? {
         println!("Cursor authentication successful!");
         Ok(true)
     } else {
