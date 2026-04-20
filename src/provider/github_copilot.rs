@@ -1,10 +1,11 @@
 // GitHub Copilot provider with OAuth device flow authentication
 // Supports the GitHub Copilot Chat API
 
-use super::Provider;
+use super::{ByteStream, Provider};
 use crate::models::{ChatMessage, ChatRequest, ChatResponse, Choice, Usage};
 use crate::Result;
 use async_trait::async_trait;
+use futures_util::StreamExt;
 use reqwest::Client;
 use serde::{Deserialize, Serialize};
 use serde_json::{json, Value};
@@ -385,7 +386,7 @@ impl Provider for GitHubCopilotProvider {
         })
     }
 
-    async fn start_streaming_request(&self, request: &ChatRequest) -> Result<reqwest::Response> {
+    async fn start_streaming_request(&self, request: &ChatRequest) -> Result<ByteStream> {
         let copilot_token = self.get_copilot_token().await?;
         let payload = self.build_payload(request, true);
 
@@ -412,7 +413,10 @@ impl Provider for GitHubCopilotProvider {
             )));
         }
 
-        Ok(response)
+        let stream = response
+            .bytes_stream()
+            .map(|chunk| chunk.map_err(std::io::Error::other));
+        Ok(Box::pin(stream))
     }
 
     fn supports_streaming(&self) -> bool {

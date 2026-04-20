@@ -3100,6 +3100,7 @@ dependencies = [
  "serde_json",
  "thiserror",
  "tokio",
+ "tokio-stream",
  "tokio-test",
  "toml",
  "tracing",

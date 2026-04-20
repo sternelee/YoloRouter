@@ -1,10 +1,11 @@
-use super::Provider;
+use super::{ByteStream, Provider};
 use crate::models::{
     AnthropicContentBlock, AnthropicRequest, ChatMessage, ChatRequest, ChatResponse, Choice, Usage,
 };
 use crate::Result;
 use async_trait::async_trait;
-use reqwest::{Client, Response};
+use futures_util::StreamExt;
+use reqwest::Client;
 use serde_json::{json, Value};
 
 pub struct AnthropicProvider {
@@ -189,7 +190,10 @@ impl AnthropicProvider {
         builder.json(&payload)
     }
 
-    pub async fn start_streaming_request(&self, request: &ChatRequest) -> Result<Response> {
+    pub async fn start_streaming_request(
+        &self,
+        request: &ChatRequest,
+    ) -> Result<crate::provider::ByteStream> {
         let response = self
             .request_builder(request, true)
             .header("accept", "text/event-stream")
@@ -208,7 +212,10 @@ impl AnthropicProvider {
             return Err(crate::error::YoloRouterError::RequestError(message));
         }
 
-        Ok(response)
+        let stream = response
+            .bytes_stream()
+            .map(|chunk| chunk.map_err(std::io::Error::other));
+        Ok(Box::pin(stream))
     }
 
     fn parse_content_blocks(data: &Value) -> Vec<AnthropicContentBlock> {
@@ -310,7 +317,7 @@ impl Provider for AnthropicProvider {
         crate::provider::models::static_provider_models("anthropic").unwrap_or_default()
     }
 
-    async fn start_streaming_request(&self, request: &ChatRequest) -> Result<Response> {
+    async fn start_streaming_request(&self, request: &ChatRequest) -> Result<ByteStream> {
         self.start_streaming_request(request).await
     }
 

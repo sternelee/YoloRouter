@@ -412,16 +412,15 @@ async fn proxy_generic_stream(
 
     // Start streaming request
     match provider.start_streaming_request(&request).await {
-        Ok(response) => {
+        Ok(byte_stream) => {
             let elapsed = start.elapsed().as_millis() as u64;
             state
                 .stats
                 .record_request(endpoint.to_string(), model_name, true, elapsed)
                 .await;
 
-            let byte_stream = response
-                .bytes_stream()
-                .map(|chunk| chunk.map_err(actix_web::error::ErrorBadGateway));
+            let byte_stream =
+                byte_stream.map(|chunk| chunk.map_err(actix_web::error::ErrorBadGateway));
 
             HttpResponse::Ok()
                 .insert_header((header::CONTENT_TYPE, "text/event-stream"))
@@ -527,16 +526,15 @@ async fn proxy_anthropic_stream(
     let start = std::time::Instant::now();
 
     match provider.start_streaming_request(&chat_req).await {
-        Ok(response) => {
+        Ok(byte_stream) => {
             let elapsed = start.elapsed().as_millis() as u64;
             state
                 .stats
                 .record_request("anthropic".to_string(), final_model, true, elapsed)
                 .await;
 
-            let byte_stream = response
-                .bytes_stream()
-                .map(|chunk| chunk.map_err(actix_web::error::ErrorBadGateway));
+            let byte_stream =
+                byte_stream.map(|chunk| chunk.map_err(actix_web::error::ErrorBadGateway));
 
             HttpResponse::Ok()
                 .insert_header((header::CONTENT_TYPE, "text/event-stream"))

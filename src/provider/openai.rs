@@ -1,8 +1,9 @@
-use super::Provider;
+use super::{ByteStream, Provider};
 use crate::models::{ChatMessage, ChatRequest, ChatResponse, Choice, Usage};
 use crate::Result;
 use async_trait::async_trait;
-use reqwest::{Client, Response};
+use futures_util::StreamExt;
+use reqwest::Client;
 use serde_json::{json, Value};
 
 pub struct OpenAIProvider {
@@ -92,7 +93,7 @@ impl Provider for OpenAIProvider {
         })
     }
 
-    async fn start_streaming_request(&self, request: &ChatRequest) -> Result<Response> {
+    async fn start_streaming_request(&self, request: &ChatRequest) -> Result<ByteStream> {
         let url = format!("{}/chat/completions", self.base_url);
         let payload = self.build_payload(request, true);
 
@@ -117,7 +118,10 @@ impl Provider for OpenAIProvider {
             return Err(crate::error::YoloRouterError::RequestError(message));
         }
 
-        Ok(response)
+        let stream = response
+            .bytes_stream()
+            .map(|chunk| chunk.map_err(std::io::Error::other));
+        Ok(Box::pin(stream))
     }
 
     fn supports_streaming(&self) -> bool {

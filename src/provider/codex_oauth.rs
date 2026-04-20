@@ -12,10 +12,11 @@
 //      → {access_token, refresh_token?, expires_in?}
 //   5. Refresh: POST same URL with grant_type=refresh_token, refresh_token, client_id, scope
 
-use super::Provider;
+use super::{ByteStream, Provider};
 use crate::models::{ChatMessage, ChatRequest, ChatResponse, Choice, Usage};
 use crate::Result;
 use async_trait::async_trait;
+use futures_util::StreamExt;
 use reqwest::Client;
 use serde::{Deserialize, Serialize};
 use serde_json::{json, Value};
@@ -588,7 +589,7 @@ impl Provider for CodexOAuthProvider {
         })
     }
 
-    async fn start_streaming_request(&self, request: &ChatRequest) -> Result<reqwest::Response> {
+    async fn start_streaming_request(&self, request: &ChatRequest) -> Result<ByteStream> {
         let token = self.get_valid_token().await?;
         let payload = self.build_payload(request, true);
 
@@ -611,7 +612,10 @@ impl Provider for CodexOAuthProvider {
             )));
         }
 
-        Ok(response)
+        let stream = response
+            .bytes_stream()
+            .map(|chunk| chunk.map_err(std::io::Error::other));
+        Ok(Box::pin(stream))
     }
 
     fn supports_streaming(&self) -> bool {
