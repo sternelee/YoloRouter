@@ -5,11 +5,13 @@ use crate::router::{Router, RoutingEngine};
 use crate::utils::StatsCollector;
 use crate::Result;
 use actix_web::{http::header, middleware, web, App, HttpResponse, HttpServer};
+use bytes::Bytes;
 use futures_util::StreamExt;
 use serde::{Deserialize, Serialize};
 use std::collections::HashMap;
 use std::sync::Arc;
 use tokio::sync::RwLock;
+use tokio_stream::wrappers::ReceiverStream;
 
 pub mod handlers;
 
@@ -445,16 +447,196 @@ async fn proxy_generic_stream(
     }
 }
 
+/// Converts an OpenAI-format SSE byte stream into an Anthropic Messages API SSE stream.
+/// Required when a non-Anthropic provider (e.g. cursor) is accessed through the
+/// `/v1/anthropic` endpoint, because Claude Code expects Anthropic-native SSE events.
+fn convert_openai_to_anthropic_sse(
+    openai_stream: crate::provider::ByteStream,
+    model: String,
+) -> crate::provider::ByteStream {
+    let (tx, rx) = tokio::sync::mpsc::channel::<std::io::Result<Bytes>>(128);
+    let msg_id = format!("msg-{}", uuid::Uuid::new_v4());
+
+    tokio::spawn(async move {
+        let mut stream = openai_stream;
+        let mut buf = String::new();
+        let mut started = false;
+
+        while let Some(result) = stream.next().await {
+            let chunk = match result {
+                Ok(c) => c,
+                Err(e) => {
+                    let _ = tx.send(Err(e)).await;
+                    return;
+                }
+            };
+            buf.push_str(&String::from_utf8_lossy(&chunk));
+
+            // Process complete SSE events (terminated by \n\n)
+            while let Some(pos) = buf.find("\n\n") {
+                let event = buf[..pos].to_string();
+                buf = buf[pos + 2..].to_string();
+
+                for line in event.lines() {
+                    let line = line.trim();
+                    if !line.starts_with("data: ") {
+                        continue;
+                    }
+                    let data = &line[6..];
+
+                    if data == "[DONE]" {
+                        if started {
+                            let _ = tx.send(Ok(Bytes::from("event: content_block_stop\ndata: {\"type\":\"content_block_stop\",\"index\":0}\n\n"))).await;
+                            let _ = tx.send(Ok(Bytes::from("event: message_delta\ndata: {\"type\":\"message_delta\",\"delta\":{\"stop_reason\":\"end_turn\",\"stop_sequence\":null},\"usage\":{\"output_tokens\":0}}\n\n"))).await;
+                            let _ = tx.send(Ok(Bytes::from("event: message_stop\ndata: {\"type\":\"message_stop\"}\n\n"))).await;
+                        }
+                        return;
+                    }
+
+                    let Ok(json) = serde_json::from_str::<serde_json::Value>(data) else { continue };
+                    let Some(text) = json
+                        .get("choices")
+                        .and_then(|c| c.as_array())
+                        .and_then(|arr| arr.first())
+                        .and_then(|choice| choice.get("delta"))
+                        .and_then(|delta| delta.get("content"))
+                        .and_then(|c| c.as_str())
+                    else {
+                        continue;
+                    };
+                    if text.is_empty() {
+                        continue;
+                    }
+
+                    if !started {
+                        started = true;
+                        let start_json = serde_json::json!({
+                            "type": "message_start",
+                            "message": {
+                                "id": msg_id,
+                                "type": "message",
+                                "role": "assistant",
+                                "model": model,
+                                "content": [],
+                                "stop_reason": null,
+                                "usage": { "input_tokens": 0, "output_tokens": 0 }
+                            }
+                        });
+                        let start_evt = format!("event: message_start\ndata: {}\n\n", start_json);
+                        let _ = tx.send(Ok(Bytes::from(start_evt))).await;
+
+                        let block_json = serde_json::json!({
+                            "type": "content_block_start",
+                            "index": 0,
+                            "content_block": { "type": "text", "text": "" }
+                        });
+                        let block_evt = format!("event: content_block_start\ndata: {}\n\n", block_json);
+                        let _ = tx.send(Ok(Bytes::from(block_evt))).await;
+                    }
+
+                    let delta_json = serde_json::json!({
+                        "type": "content_block_delta",
+                        "index": 0,
+                        "delta": { "type": "text_delta", "text": text }
+                    });
+                    let delta_evt = format!("event: content_block_delta\ndata: {}\n\n", delta_json);
+                    let _ = tx.send(Ok(Bytes::from(delta_evt))).await;
+                }
+            }
+        }
+
+        // EOF: send finish events if we emitted any content
+        if started {
+            let _ = tx.send(Ok(Bytes::from("event: content_block_stop\ndata: {\"type\":\"content_block_stop\",\"index\":0}\n\n"))).await;
+            let _ = tx.send(Ok(Bytes::from("event: message_delta\ndata: {\"type\":\"message_delta\",\"delta\":{\"stop_reason\":\"end_turn\",\"stop_sequence\":null},\"usage\":{\"output_tokens\":0}}\n\n"))).await;
+            let _ = tx.send(Ok(Bytes::from("event: message_stop\ndata: {\"type\":\"message_stop\"}\n\n"))).await;
+        }
+    });
+
+    Box::pin(ReceiverStream::new(rx))
+}
+
 async fn proxy_anthropic_stream(
     state: &web::Data<AppState>,
     request: AnthropicRequest,
 ) -> HttpResponse {
     let model = request.model.clone();
 
-    // Handle provider:model format - forward to generic streaming proxy
+    // Handle provider:model format
     if model.contains(':') {
-        let chat_req = streaming_chat_request(request);
-        return proxy_generic_stream(state, chat_req, "anthropic").await;
+        let parts: Vec<&str> = model.split(':').collect();
+        if parts.len() != 2 {
+            return anthropic_error_response(
+                actix_web::http::StatusCode::BAD_REQUEST,
+                "invalid_request_error",
+                format!("Invalid model format '{}'. Expected 'provider:model'.", model),
+            );
+        }
+        let (provider_name, model_name) = (parts[0], parts[1]);
+
+        if provider_name == "anthropic" {
+            let mut streaming_request = request;
+            streaming_request.model = model_name.to_string();
+            return Box::pin(proxy_anthropic_stream(state, streaming_request)).await;
+        }
+
+        // Non-Anthropic provider: fetch OpenAI-format SSE and convert to Anthropic format
+        let provider = match state.router.provider(provider_name).await {
+            Some(p) => p,
+            None => {
+                return anthropic_error_response(
+                    actix_web::http::StatusCode::BAD_REQUEST,
+                    "invalid_request_error",
+                    format!("Provider '{}' not found", provider_name),
+                )
+            }
+        };
+
+        if !provider.supports_streaming() {
+            return anthropic_error_response(
+                actix_web::http::StatusCode::BAD_REQUEST,
+                "invalid_request_error",
+                format!("Provider '{}' does not support streaming", provider_name),
+            );
+        }
+
+        let mut chat_req = ChatRequest::from(request);
+        chat_req.model = model_name.to_string();
+        let final_model = chat_req.model.clone();
+        let start = std::time::Instant::now();
+
+        return match provider.start_streaming_request(&chat_req).await {
+            Ok(byte_stream) => {
+                let elapsed = start.elapsed().as_millis() as u64;
+                state
+                    .stats
+                    .record_request("anthropic".to_string(), final_model, true, elapsed)
+                    .await;
+
+                let anthropic_stream =
+                    convert_openai_to_anthropic_sse(byte_stream, model_name.to_string());
+                let byte_stream =
+                    anthropic_stream.map(|chunk| chunk.map_err(actix_web::error::ErrorBadGateway));
+
+                HttpResponse::Ok()
+                    .insert_header((header::CONTENT_TYPE, "text/event-stream"))
+                    .insert_header((header::CACHE_CONTROL, "no-cache"))
+                    .insert_header(("Connection", "keep-alive"))
+                    .streaming(byte_stream)
+            }
+            Err(e) => {
+                let elapsed = start.elapsed().as_millis() as u64;
+                state
+                    .stats
+                    .record_request("anthropic".to_string(), final_model, false, elapsed)
+                    .await;
+                anthropic_error_response(
+                    actix_web::http::StatusCode::SERVICE_UNAVAILABLE,
+                    "api_error",
+                    e.to_string(),
+                )
+            }
+        }
     }
 
     // Handle "auto" model: use router to select best model, then stream
@@ -476,11 +658,12 @@ async fn proxy_anthropic_stream(
                     "Auto-selected model for Anthropic streaming request"
                 );
 
-                // If auto-selected a non-Anthropic provider, use generic streaming
+                // If auto-selected a non-Anthropic provider, stream through
+                // proxy_anthropic_stream so it gets converted to Anthropic SSE format.
                 if provider_name != "anthropic" {
-                    let mut new_req = chat_req;
-                    new_req.model = format!("{}:{}", provider_name, selected_model);
-                    return proxy_generic_stream(state, new_req, "anthropic").await;
+                    let mut streaming_request = request;
+                    streaming_request.model = format!("{}:{}", provider_name, selected_model);
+                    return Box::pin(proxy_anthropic_stream(state, streaming_request)).await;
                 }
 
                 // Create a new request with the selected model (Anthropic)
