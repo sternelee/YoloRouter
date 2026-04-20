@@ -1,6 +1,7 @@
 use std::env;
 use std::path::PathBuf;
 use yolo_router::tui::codex_auth::run_codex_device_flow;
+use yolo_router::tui::cursor_auth::run_cursor_device_flow;
 use yolo_router::tui::github_auth::run_github_device_flow;
 use yolo_router::{server, tui::TuiManager, utils, Config};
 
@@ -118,9 +119,23 @@ async fn run_auth(provider: &str) -> yolo_router::Result<()> {
                 Err(e) => eprintln!("Auth error: {e}"),
             }
         }
+        "cursor" => {
+            println!("Starting Cursor authentication...");
+            match run_cursor_device_flow(None).await {
+                Ok(true) => {
+                    println!("✅ Cursor is ready to use.");
+                    println!("   Add to config.toml:");
+                    println!("   [[providers]]");
+                    println!("   name = \"cursor\"");
+                    println!("   provider_type = \"cursor\"");
+                }
+                Ok(false) => println!("Authentication cancelled."),
+                Err(e) => eprintln!("Auth error: {e}"),
+            }
+        }
         other => {
             eprintln!("Unknown auth provider: {other}");
-            eprintln!("Supported: github, codex, anthropic, openai, gemini");
+            eprintln!("Supported: github, codex, cursor, anthropic, openai, gemini");
             eprintln!();
             eprintln!("For API key providers, set the key in your config.toml or as environment variable:");
             eprintln!("  ANTHROPIC_API_KEY, OPENAI_API_KEY, GEMINI_API_KEY");

@@ -122,6 +122,16 @@ impl ProviderFactory {
                     Ok(Arc::new(CodexOAuthProvider::new(token_path)))
                 }
             }
+            "cursor" => {
+                let mut provider = CursorProvider::new();
+                if let Some(path) = config.extra.get("agent_path").and_then(|v| v.as_str()) {
+                    provider = provider.with_agent_path(path.to_string());
+                }
+                if let Some(timeout) = config.extra.get("timeout_ms").and_then(|v| v.as_integer()) {
+                    provider = provider.with_timeout(timeout as u64);
+                }
+                Ok(Arc::new(provider))
+            }
             _ => {
                 let api_key = config.api_key.clone().ok_or_else(|| {
                     YoloRouterError::ConfigError(format!(

@@ -1,6 +1,7 @@
 pub mod auth;
 pub mod codex_auth;
 pub mod config_editor;
+pub mod cursor_auth;
 pub mod github_auth;
 
 pub use auth::AuthFlow;
@@ -1684,6 +1685,18 @@ fn draw_auth(f: &mut ratatui::Frame, _app: &TuiApp, area: ratatui::layout::Rect)
         Line::from("    → Tokens saved to ~/.config/yolo-router/codex_oauth.json"),
         Line::from(""),
         Line::from(Span::styled(
+            "  ─── CLI Login ──────────────────────────────────────────────────",
+            Style::default().fg(Color::DarkGray),
+        )),
+        Line::from(""),
+        Line::from(Span::styled(
+            "  yolo-router --auth cursor",
+            Style::default().fg(Color::Green),
+        )),
+        Line::from("    → Runs cursor-agent login (requires Cursor IDE)"),
+        Line::from("    → Token saved to ~/.cursor/cli-config.json"),
+        Line::from(""),
+        Line::from(Span::styled(
             "  ─── API Keys ──────────────────────────────────────────────────",
             Style::default().fg(Color::DarkGray),
         )),
@@ -1770,6 +1783,7 @@ fn draw_help(f: &mut ratatui::Frame, area: ratatui::layout::Rect) {
         Line::from("  yolo-router --tui            → Open this TUI"),
         Line::from("  yolo-router --auth github    → GitHub Copilot OAuth"),
         Line::from("  yolo-router --auth codex     → ChatGPT Pro OAuth"),
+        Line::from("  yolo-router --auth cursor    → Cursor IDE login"),
         Line::from("  YOLO_CONFIG=./config.toml yolo-router"),
     ];
 

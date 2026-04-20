@@ -146,6 +146,53 @@ pub fn static_provider_models(provider_type: &str) -> Option<Vec<String>> {
             "gemini-pro".to_string(),
             "gemini-pro-vision".to_string(),
         ]),
+        "cursor" => Some(vec![
+            "auto".to_string(),
+            "composer-1.5".to_string(),
+            "composer-1".to_string(),
+            "opus-4.6-thinking".to_string(),
+            "opus-4.6".to_string(),
+            "sonnet-4.6".to_string(),
+            "sonnet-4.6-thinking".to_string(),
+            "opus-4.5".to_string(),
+            "opus-4.5-thinking".to_string(),
+            "sonnet-4.5".to_string(),
+            "sonnet-4.5-thinking".to_string(),
+            "gpt-5.4-high".to_string(),
+            "gpt-5.4-high-fast".to_string(),
+            "gpt-5.4-xhigh".to_string(),
+            "gpt-5.4-xhigh-fast".to_string(),
+            "gpt-5.4-medium".to_string(),
+            "gpt-5.4-medium-fast".to_string(),
+            "gpt-5.3-codex".to_string(),
+            "gpt-5.3-codex-fast".to_string(),
+            "gpt-5.3-codex-low".to_string(),
+            "gpt-5.3-codex-low-fast".to_string(),
+            "gpt-5.3-codex-high".to_string(),
+            "gpt-5.3-codex-high-fast".to_string(),
+            "gpt-5.3-codex-xhigh".to_string(),
+            "gpt-5.3-codex-xhigh-fast".to_string(),
+            "gpt-5.3-codex-spark-preview".to_string(),
+            "gpt-5.2".to_string(),
+            "gpt-5.2-high".to_string(),
+            "gpt-5.2-codex".to_string(),
+            "gpt-5.2-codex-fast".to_string(),
+            "gpt-5.2-codex-low".to_string(),
+            "gpt-5.2-codex-low-fast".to_string(),
+            "gpt-5.2-codex-high".to_string(),
+            "gpt-5.2-codex-high-fast".to_string(),
+            "gpt-5.2-codex-xhigh".to_string(),
+            "gpt-5.2-codex-xhigh-fast".to_string(),
+            "gpt-5.1-codex-max".to_string(),
+            "gpt-5.1-codex-max-high".to_string(),
+            "gpt-5.1-codex-mini".to_string(),
+            "gpt-5.1-high".to_string(),
+            "gemini-3.1-pro".to_string(),
+            "gemini-3-pro".to_string(),
+            "gemini-3-flash".to_string(),
+            "grok".to_string(),
+            "kimi-k2.5".to_string(),
+        ]),
         _ => None,
     }
 }
@@ -157,7 +204,7 @@ pub async fn fetch_provider_models(cfg: &ProviderConfig) -> Result<Vec<String>, 
     }
 
     let models = match cfg.provider_type.as_str() {
-        "anthropic" | "github_copilot" | "github" | "codex_oauth" => {
+        "anthropic" | "github_copilot" | "github" | "codex_oauth" | "cursor" => {
             Ok(static_provider_models(&cfg.provider_type).unwrap_or_default())
         }
         "gemini" => {
