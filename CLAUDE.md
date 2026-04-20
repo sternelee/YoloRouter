@@ -43,8 +43,8 @@ cargo run --release -- --tui --config config.toml
 
 # OAuth authentication
 ./target/release/yolo-router --auth github      # GitHub Copilot
-./target/release/yolo-router --auth codex       # ChatGPT Pro / Codex
-./target/release/yolo-router --auth cursor      # Cursor IDE (via cursor-agent login)
+cargo run --release -- --auth codex       # ChatGPT Pro / Codex
+cargo run --release -- --auth cursor      # Cursor IDE (via cursor-agent login)
 ```
 
 ## High-Level Architecture
@@ -67,6 +67,8 @@ pub trait Provider: Send + Sync {
 ```
 
 `ProviderFactory::create_provider()` (`src/provider/factory.rs`) dispatches by `provider_type` string (`"anthropic"`, `"openai"`, `"github_copilot"` / `"github"`, `"codex_oauth"`, `"gemini"`, `"codex"`, `"cursor"`). The generic `openai` type with a custom `base_url` handles all OpenAI-compatible third-party services (OpenRouter, Groq, DeepSeek, Ollama, etc.).
+
+`ProviderRegistry` (`src/router/mod.rs`) is built from config and holds instantiated providers in a `HashMap<String, Arc<dyn Provider>>`.
 
 **To add a new provider:** create a file in `src/provider/`, implement the `Provider` trait, and register it in `factory.rs`.
 
@@ -92,6 +94,7 @@ extra = { agent_path = "/usr/local/bin/cursor-agent", timeout_ms = 300000 }
 
 `Router` wraps `RoutingEngine` with a shared `ProviderHealthTracker`. This is the interface the server uses:
 - `Router::route()` delegates to `RoutingEngine::route()` with health tracking
+- `Router::select_best_model()` returns `(provider_name, model_name)` without executing the request — used by streaming endpoints to log and rewrite the model field
 - `Router::reload()` rebuilds the engine from a new `Config` but **preserves cooldown state**
 - `Router::provider()` looks up a provider by name from the registry
 
@@ -137,6 +140,15 @@ The server exposes protocol-adapter endpoints. The endpoint name determines the 
 - `proxy_anthropic_stream()` handles Anthropic-native SSE format (preserves `data:` prefixes, `event:` lines, etc.)
 - Auto-resolution of `"model": "auto"` works with streaming
 - Zero-copy byte stream forwarding via `reqwest` -> `actix-web`
+
+### TUI Dashboard (`src/tui/mod.rs`)
+
+The `--tui` flag launches a `ratatui`-based terminal dashboard with tabs for Status, Providers, Scenarios, Auth, and Help. It runs independently of the daemon and communicates via local HTTP control endpoints:
+
+- `ControlCommand::Override { endpoint, scenario }` -> `POST /control/override`
+- `ControlCommand::Reload` -> `POST /control/reload`
+
+The TUI also embeds OAuth device flow UIs for GitHub Copilot (`src/tui/github_auth.rs`), Codex (`src/tui/codex_auth.rs`), and Cursor (`src/tui/cursor_auth.rs`).
 
 ### Config System (`src/config/`)
 

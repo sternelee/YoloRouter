@@ -62,12 +62,17 @@ impl CursorProvider {
             "--output-format".to_string(),
             "stream-json".to_string(),
             "--stream-partial-output".to_string(),
+            "--mode".to_string(),
+            "ask".to_string(),
             "--model".to_string(),
             model.to_string(),
         ]
     }
 
     /// Parse a stream-json line and extract assistant text.
+    ///
+    /// cursor-agent outputs:
+    /// `{"type":"assistant","message":{"role":"assistant","content":[{"type":"text","text":"..."}]}}`
     fn parse_stream_line(&self, line: &str) -> Option<String> {
         let line = line.trim();
         if line.is_empty() {
@@ -76,14 +81,25 @@ impl CursorProvider {
 
         let value: Value = serde_json::from_str(line).ok()?;
 
-        // Extract assistant text content
-        if value.get("type")?.as_str()? == "assistant" {
-            if let Some(content) = value.get("content").and_then(|c| c.as_str()) {
-                return Some(content.to_string());
-            }
+        if value.get("type")?.as_str()? != "assistant" {
+            return None;
         }
 
-        None
+        // Navigate: message.content[0].text
+        value
+            .get("message")?
+            .get("content")?
+            .as_array()?
+            .iter()
+            .filter_map(|block| {
+                if block.get("type")?.as_str()? == "text" {
+                    block.get("text")?.as_str()
+                } else {
+                    None
+                }
+            })
+            .next()
+            .map(|s| s.to_string())
     }
 }
 
@@ -131,16 +147,40 @@ impl Provider for CursorProvider {
         }
 
         let stdout = String::from_utf8_lossy(&output.stdout);
+        let stderr = String::from_utf8_lossy(&output.stderr);
         let mut content = String::new();
+        let mut result_content: Option<String> = None;
 
         for line in stdout.lines() {
             if let Some(text) = self.parse_stream_line(line) {
                 content.push_str(&text);
             }
+            // Capture the final result event if present (avoids duplicate assistant chunks)
+            if let Ok(value) = serde_json::from_str::<Value>(line) {
+                if value.get("type").and_then(|t| t.as_str()) == Some("result") {
+                    if let Some(text) = value.get("result").and_then(|r| r.as_str()) {
+                        result_content = Some(text.to_string());
+                    }
+                }
+            }
+        }
+
+        // Prefer the complete result over accumulated assistant chunks
+        if let Some(result) = result_content {
+            content = result;
         }
 
         if content.is_empty() {
-            content = "No response from cursor-agent".to_string();
+            let stdout_preview = if stdout.trim().is_empty() {
+                "(empty)".to_string()
+            } else {
+                format!("(first 500 chars): {}", &stdout[..stdout.len().min(500)])
+            };
+            return Err(crate::error::YoloRouterError::RequestError(format!(
+                "cursor-agent produced no assistant content. stdout {}, stderr: {}",
+                stdout_preview,
+                if stderr.trim().is_empty() { "(empty)".to_string() } else { stderr.trim().to_string() }
+            )));
         }
 
         Ok(ChatResponse {
@@ -274,7 +314,21 @@ impl Provider for CursorProvider {
 
                 match event_type {
                     "assistant" => {
-                        if let Some(content) = value.get("content").and_then(|c| c.as_str()) {
+                        let content = value
+                            .get("message")
+                            .and_then(|m| m.get("content"))
+                            .and_then(|c| c.as_array())
+                            .and_then(|arr| {
+                                arr.iter()
+                                    .find_map(|block| {
+                                        if block.get("type")?.as_str()? == "text" {
+                                            block.get("text")?.as_str()
+                                        } else {
+                                            None
+                                        }
+                                    })
+                            });
+                        if let Some(text) = content {
                             let chunk = serde_json::json!({
                                 "id": &id,
                                 "object": "chat.completion.chunk",
@@ -282,7 +336,7 @@ impl Provider for CursorProvider {
                                 "model": format!("cursor/{}", model),
                                 "choices": [{
                                     "index": 0,
-                                    "delta": { "content": content },
+                                    "delta": { "content": text },
                                     "finish_reason": null
                                 }]
                             });
@@ -474,19 +528,27 @@ mod tests {
         assert!(args.contains(&"--model".to_string()));
         assert!(args.contains(&"sonnet-4.5".to_string()));
         assert!(args.contains(&"stream-json".to_string()));
+        assert!(args.contains(&"--mode".to_string()));
+        assert!(args.contains(&"ask".to_string()));
     }
 
     #[test]
     fn test_parse_stream_line() {
         let provider = CursorProvider::new();
 
-        let line = r#"{"type": "assistant", "content": "Hello world"}"#;
+        // cursor-agent actual format: message.content[0].text
+        let line = r#"{"type":"assistant","message":{"role":"assistant","content":[{"type":"text","text":"Hello world"}]}}"#;
         assert_eq!(
             provider.parse_stream_line(line),
             Some("Hello world".to_string())
         );
 
-        let line = r#"{"type": "thinking", "content": "..."}"#;
+        // Non-assistant type should return None
+        let line = r#"{"type":"thinking","message":{"role":"assistant","content":[{"type":"text","text":"..."}]}}"#;
+        assert_eq!(provider.parse_stream_line(line), None);
+
+        // Old format (flat content string) should return None
+        let line = r#"{"type": "assistant", "content": "Hello world"}"#;
         assert_eq!(provider.parse_stream_line(line), None);
     }
 }
